@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="ProyectoBarber.BD/ProyectoBarber.BD.csproj" />
+  <Project Path="ProyectoBarber.Repositorio/ProyectoBarber.Repositorio.csproj" />
+  <Project Path="ProyectoBarber.Server/ProyectoBarber.Server.Client/ProyectoBarber.Server.Client.csproj" />
+  <Project Path="ProyectoBarber.Server/ProyectoBarber.Server/ProyectoBarber.Server.csproj" />
+  <Project Path="ProyectoBarber.Servicio/ProyectoBarber.Servicio.csproj" />
+  <Project Path="ProyectoBarber.Shared/ProyectoBarber.Shared.csproj" />
+</Solution>
