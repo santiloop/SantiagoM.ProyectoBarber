@@ -4,8 +4,8 @@ using System.Text;
 
 namespace ProyectoBarber.BD.Datos.Entity
 {
-    public class EntityBase
+    public class EntityBase : IEntityBase
     {
-        public int id {get; set; }
+        public int Id { get; set; }
     }
 }

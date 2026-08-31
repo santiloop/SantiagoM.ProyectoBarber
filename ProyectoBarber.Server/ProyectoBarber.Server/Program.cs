@@ -2,29 +2,37 @@ using Microsoft.EntityFrameworkCore;
 using ProyectoBarber.BD;
 using ProyectoBarber.Repositorio;
 using ProyectoBarber.BD.Datos;
+using ProyectoBarber.BD.Datos.Entity;
+using ProyectoBarber.Server.Client.Pages;
+using ProyectoBarber.Server.Components;
 
 var builder = WebApplication.CreateBuilder(args);
 
 #region Servicios
+
 var connectionString = builder.Configuration
-                    .GetConnectionString("connSql") ??
+                    .GetConnectionString("AppConn") ??
                     throw new InvalidOperationException("La conexión a la base de datos no funciona.");
 
-builder.Services.AddDbContext<AppDBContext>(options =>
+builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(connectionString));
 
-
-// Nota: la clase se llama AppDBContext (DB en mayúsculas) en ProyectoBarber.BD.Datos, ajustar si es necesario.
+builder.Services.AddSwaggerGen();
 builder.Services.AddControllersWithViews();
 builder.Services.AddRazorPages();
 
-builder.Services.AddScoped<IBarberRepositorio, BarberRepositorio>();
+#region Inyeccion de dependencias
+builder.Services.AddScoped<IBarberoRepositorio, BarberoRepositorio>();
+builder.Services.AddScoped<ITurnoRepositorio, TurnoRepositorio>();
+builder.Services.AddScoped<IClienteRepositorio, ClienteRepositorio>();
+#endregion
 
 #endregion
 
 var app = builder.Build();
 
 #region Middleware
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
@@ -45,9 +53,12 @@ app.UseRouting();
 app.MapRazorPages();
 app.MapControllers();
 app.MapFallbackToFile("index.html");
+
 #endregion
 
 app.Run();
+
+
 //using Microsoft.EntityFrameworkCore;
 //using ProyectoBarber.BD.Datos;
 //using ProyectoBarber.Server.Client.Pages;
