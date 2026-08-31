@@ -13,7 +13,6 @@ var connectionString = builder.Configuration
 builder.Services.AddDbContext<AppDBContext>(options =>
     options.UseSqlServer(connectionString));
 
-builder.Services.AddSwaggerGen();
 
 // Nota: la clase se llama AppDBContext (DB en mayúsculas) en ProyectoBarber.BD.Datos, ajustar si es necesario.
 builder.Services.AddControllersWithViews();
