@@ -1,0 +1,86 @@
+@page "/clientes/editar/{Id:int}"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU07 - Gestionar clientes: MODIFICAR (paso 7)
+   Trae el cliente con GET api/cliente/{id} y graba con PUT api/cliente/{id}.
+   Paso 8: boton Borrar (DELETE api/cliente/{id}) con cartel de confirmacion.
+   ================================================================== *@
+
+<PageTitle>Editar cliente</PageTitle>
+
+<h3>Editar cliente</h3>
+
+@if (cliente == null)
+{
+    <p>@(string.IsNullOrEmpty(mensaje) ? "Buscando ...." : "")</p>
+}
+else
+{
+    <EditForm Model="cliente" OnValidSubmit="Grabar" FormName="EditarClienteForm">
+        <DataAnnotationsValidator />
+        <div class="mb-3" style="max-width: 400px;">
+            <label class="form-label">Nombre:</label>
+            <InputText class="form-control" @bind-Value="cliente.Nombre" />
+            <ValidationMessage For="@(() => cliente.Nombre)" />
+        </div>
+        <div class="mb-3" style="max-width: 400px;">
+            <label class="form-label">Teléfono:</label>
+            <InputText class="form-control" @bind-Value="cliente.Telefono" />
+            <ValidationMessage For="@(() => cliente.Telefono)" />
+        </div>
+        <button class="btn btn-primary" type="submit">Grabar</button>
+        <button class="btn btn-secondary" type="button" @onclick="Cancelar">Cancelar</button>
+        <button class="btn btn-outline-danger float-end" type="button" @onclick="() => confirmacion!.Ver()">Borrar</button>
+    </EditForm>
+
+    @* Paso 8 - Borrar (dentro de Editar), con el cartel de confirmacion *@
+    <Confirmacion @ref="confirmacion" Titulo="Borrar cliente" textOk="Borrar"
+                  onConfirm="Borrar" onCancel="() => confirmacion!.Ocultar()">
+        ¿Seguro que querés borrar el cliente <strong>@cliente.Nombre</strong>?
+        <div class="text-muted small mt-2">No se puede si tiene turnos registrados.</div>
+    </Confirmacion>
+}
+
+<p class="text-danger mt-3">@mensaje</p>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ClienteDTO? cliente;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await http.GetAsync<ClienteDTO>($"api/cliente/{Id}");
+        if (resp.Error)
+            mensaje = resp.Mensaje ?? "No se pudo leer el cliente.";
+        else
+            cliente = resp.Respuesta;
+    }
+
+    private async Task Grabar()
+    {
+        var resp = await http.PutAsync<ClienteDTO, bool>($"api/cliente/{Id}", cliente!);
+        if (!resp.Error)
+            nav.NavigateTo("/clientes");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo grabar.";
+    }
+
+    private Confirmacion? confirmacion;
+
+    // Paso 8 - DELETE api/cliente/{id}. Si el servidor no lo permite, muestra su mensaje.
+    private async Task Borrar()
+    {
+        confirmacion?.Ocultar();
+        var resp = await http.DeleteAsync<bool>($"api/cliente/{Id}");
+        if (!resp.Error)
+            nav.NavigateTo("/clientes");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo borrar.";
+    }
+
+    private void Cancelar() => nav.NavigateTo("/clientes");
+}

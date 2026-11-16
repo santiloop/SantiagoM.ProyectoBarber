@@ -1,23 +1,153 @@
 ﻿@inherits LayoutComponentBase
+@inject NavigationManager nav
+@inject IHttpService http
+@implements IDisposable
+@* Paso 5 - Diseno general: menu a la izquierda y la page en el centro.
+   El aviso de error (blazor-error-ui) ahora esta en wwwroot/index.html.
+   Paso 10 - Control de sesion (CU01):
+     - Sin sesion (o vencida): solo se puede ver /login; cualquier otra page lleva al login.
+     - Con contrasena por cambiar: lleva a /cambiar-contrasena hasta que la cambie.
+     - Arriba: nombre y rol del usuario, "Cambiar contraseña" y "Cerrar sesión".
+   Paso 12 - Campanita de avisos arriba: cantidad de avisos sin leer de ESTE usuario
+     (GET api/aviso/cantidad). Se actualiza cada 60 segundos y en cada cambio de page.
+     Al tocarla va a /avisos. *@
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
-
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+@if (!cargada)
+{
+    <p class="p-4">Cargando ....</p>
+}
+else if (!sesion.Logueado)
+{
+    @if (RutaActual == "login" || RutaActual == "cliente")
+    {
+        <main>
+            <article class="content px-4">
+                @Body
+            </article>
+        </main>
+    }
+    else
+    {
+        <p class="p-4">Redirigiendo al inicio de sesión ....</p>
+    }
+}
+else
+{
+    <div class="page">
+        <div class="sidebar">
+            <NavMenu />
         </div>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+        <main>
+            <div class="top-row px-4 justify-content-end">
+                <a class="me-3 position-relative text-decoration-none" href="avisos" title="Avisos">
+                    🔔
+                    @if (noLeidos > 0)
+                    {
+                        <span class="badge rounded-pill bg-danger">@(noLeidos > 99 ? "99+" : noLeidos.ToString())</span>
+                    }
+                </a>
+                <span class="me-3">@sesion.Nombre <span class="text-muted">(@sesion.RolNombre)</span></span>
+                <a class="me-3" href="cambiar-contrasena">Cambiar contraseña</a>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarSesion">Cerrar sesión</button>
+            </div>
 
-<div id="blazor-error-ui" data-nosnippet>
-    An unhandled error has occurred.
-    <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
-</div>
+            <article class="content px-4">
+                @Body
+            </article>
+        </main>
+    </div>
+}
+
+@code {
+    private bool cargada;
+
+    // Paso 12 - campanita
+    private int noLeidos;
+    private System.Threading.Timer? reloj;
+
+    // "agenda", "login", "turnos/nuevo"... (sin la parte de ?fecha=)
+    private string RutaActual => nav.ToBaseRelativePath(nav.Uri).Split('?', '#')[0].Trim('/').ToLower();
+
+    protected override async Task OnInitializedAsync()
+    {
+        sesion.OnCambio += Refrescar;
+        sesion.OnAvisosLeidos += AvisosLeidos;
+        await sesion.Cargar();
+        cargada = true;
+        Verificar();
+
+        // Cada 60 segundos pregunta cuantos avisos hay sin leer.
+        reloj = new System.Threading.Timer(_ => InvokeAsync(LeerCantidad), null,
+                                           TimeSpan.Zero, TimeSpan.FromSeconds(60));
+    }
+
+    // Se ejecuta en cada cambio de page.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (cargada)
+        {
+            Verificar();
+            await LeerCantidad();
+        }
+    }
+
+    private async Task LeerCantidad()
+    {
+        // Sin sesion o con la contrasena por cambiar, el servidor no responde avisos.
+        if (!sesion.Logueado || sesion.Datos!.DebeCambiarContrasena)
+        {
+            noLeidos = 0;
+            return;
+        }
+        var resp = await http.GetAsync<int>("api/aviso/cantidad");
+        if (!resp.Error)
+        {
+            noLeidos = resp.Respuesta;
+            StateHasChanged();
+        }
+    }
+
+    private void AvisosLeidos()
+    {
+        noLeidos = 0;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void Verificar()
+    {
+        var ruta = RutaActual;
+        if (!sesion.Logueado)
+        {
+            // Paso 11 - "cliente" (portal del cliente) es publica: no pide iniciar sesion.
+            if (ruta != "login" && ruta != "cliente") nav.NavigateTo("login");
+        }
+        else if (ruta == "cliente")
+        {
+            // Un usuario de la barberia tambien puede ver el portal del cliente.
+        }
+        else if (sesion.Datos!.DebeCambiarContrasena)
+        {
+            if (ruta != "cambiar-contrasena") nav.NavigateTo("cambiar-contrasena");
+        }
+        else if (ruta == "login" || ruta == "")
+        {
+            nav.NavigateTo("agenda");
+        }
+    }
+
+    private async Task CerrarSesion()
+    {
+        await sesion.Cerrar();
+        nav.NavigateTo("login");
+    }
+
+    private void Refrescar() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        sesion.OnCambio -= Refrescar;
+        sesion.OnAvisosLeidos -= AvisosLeidos;
+        reloj?.Dispose();
+    }
+}

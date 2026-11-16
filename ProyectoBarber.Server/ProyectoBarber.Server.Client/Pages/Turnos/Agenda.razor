@@ -1,0 +1,444 @@
+﻿@page "/agenda"
+@inject IHttpService http
+@inject NavigationManager nav
+@implements IDisposable
+
+@* ==================================================================
+   CU03 - Consultar agenda (paso 6). Pantalla principal de la recepcionista.
+   Arriba: "Turnos a confirmar" -> GET api/turno/aconfirmar
+           (pendientes sin confirmar de las proximas 2 horas: hay que llamar al cliente).
+           Paso 8: boton Confirmar -> PUT api/turno/{id}/confirmar
+   Abajo:  turnos de un dia -> GET api/turno/listaturnos?fecha=...&barberoId=...&estado=...
+           Abre en HOY (o en el dia que viene en ?fecha=2026-10-12).
+   Se actualiza sola cada 1 minuto y tambien con el boton "Actualizar".
+   Paso 8 - Acciones de cada turno (PUT api/turno/{id}/estado, con cartel de confirmacion):
+     Pendiente:   Iniciar atencion (ENA), Ausente (AUS, desde la hora), Cancelar (CAN),
+                  Reprogramar (CU04), Confirmar
+     En atencion: Terminar (ATE), Cancelar y Ausente (motivo obligatorio)
+     Atendido / Ausente / Cancelado: Volver a pendiente (correccion)
+     Todos:       Historial (con observaciones; se puede corregir)
+   Boton "Nuevo turno" (CU02) abre el alta con el dia de la agenda.
+   ================================================================== *@
+
+<PageTitle>Agenda</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h3 class="mb-0">Agenda</h3>
+    <div>
+        <span class="text-muted me-2">Actualizado a las @ultimaActualizacion.ToString("HH:mm")</span>
+        <button class="btn btn-outline-primary btn-sm" @onclick="Actualizar">Actualizar</button>
+        <a class="btn btn-primary btn-sm ms-1" href="turnos/nuevo?fecha=@fecha.ToString("yyyy-MM-dd")">Nuevo turno</a>
+    </div>
+</div>
+
+@* ---------- Turnos a confirmar (aviso 2 horas antes) ---------- *@
+@if (aConfirmar != null && aConfirmar.Count > 0)
+{
+    <div class="alert alert-warning">
+        <strong>Turnos a confirmar (próximas 2 horas):</strong> llamar al cliente para corroborar si viene.
+        <table class="table table-sm mb-0 mt-2">
+            <thead>
+                <tr>
+                    <th>Hora</th>
+                    <th>Cliente</th>
+                    <th>Teléfono</th>
+                    <th>Barbero</th>
+                    <th>Servicio</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in aConfirmar)
+                {
+                    <tr>
+                        <td>@t.FechaHora.ToString("HH:mm")</td>
+                        <td>@t.Cliente</td>
+                        <td>@t.ClienteTelefono</td>
+                        <td>@t.Barbero</td>
+                        <td>@t.Servicio</td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-success btn-sm" @onclick="() => Confirmar(t)">Confirmar</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick='() => PedirCambio(t, "CAN")'>Cancelar</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (aConfirmar != null)
+{
+    <div class="alert alert-light border">No hay turnos para confirmar en las próximas 2 horas.</div>
+}
+
+@* ---------- Filtros ---------- *@
+<div class="row g-2 align-items-end mb-3">
+    <div class="col-auto">
+        <label class="form-label">Día</label>
+        <div class="input-group">
+            <button class="btn btn-outline-secondary" title="Día anterior" @onclick="() => CambiarDia(-1)">◀</button>
+            <input type="date" class="form-control" @bind="fecha" @bind:after="LeerTurnos" />
+            <button class="btn btn-outline-secondary" title="Día siguiente" @onclick="() => CambiarDia(1)">▶</button>
+        </div>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-outline-secondary" @onclick="IrAHoy">Hoy</button>
+    </div>
+    <div class="col-auto">
+        <label class="form-label">Barbero</label>
+        <select class="form-select" @bind="barberoId" @bind:after="LeerTurnos">
+            <option value="0">Todos</option>
+            @foreach (var b in barberos)
+            {
+                <option value="@b.Id">@b.Nombre</option>
+            }
+        </select>
+    </div>
+    <div class="col-auto">
+        <label class="form-label">Estado</label>
+        <select class="form-select" @bind="estado" @bind:after="LeerTurnos">
+            <option value="">Todos</option>
+            @foreach (var e in estados)
+            {
+                <option value="@e.Codigo">@e.Nombre</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(mensajeOk))
+{
+    <div class="alert alert-success py-2">@mensajeOk</div>
+}
+<p class="text-danger">@mensaje</p>
+
+@* ---------- Turnos del dia ---------- *@
+<h5>@NombreDia(fecha) @fecha.ToString("dd/MM/yyyy")</h5>
+
+@if (turnos == null)
+{
+    <p>Buscando ....</p>
+}
+else if (turnos.Count == 0)
+{
+    <p>No hay turnos para este día.</p>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Hora</th>
+                    <th>Cliente</th>
+                    <th>Barbero</th>
+                    <th>Servicio</th>
+                    <th>Estado</th>
+                    <th>Real</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in turnos)
+                {
+                    <tr>
+                        <td class="text-nowrap">@t.FechaHora.ToString("HH:mm") a @t.FechaHoraFinEstimada.ToString("HH:mm")</td>
+                        <td>
+                            @t.Cliente <span class="text-muted small">@t.ClienteTelefono</span>
+                            @if (t.PedidoPorCliente)
+                            {
+                                @* Paso 11 - turno pedido por el cliente desde la web *@
+                                <span class="badge bg-info text-dark ms-1">pedido por el cliente</span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(t.Observaciones))
+                            {
+                                <div class="small text-muted">📝 @t.Observaciones</div>
+                            }
+                        </td>
+                        <td>@t.Barbero</td>
+                        <td>@t.Servicio</td>
+                        <td>
+                            <span class="badge @ColorEstado(t.EstadoCodigo)">@t.Estado</span>
+                            @if (t.EstadoCodigo == "PEN")
+                            {
+                                <div class="small @(t.Confirmado ? "text-success" : "text-muted")">@(t.Confirmado ? "Confirmado" : "Sin confirmar")</div>
+                            }
+                        </td>
+                        <td class="text-nowrap small">
+                            @(t.FechaHoraInicioReal?.ToString("HH:mm") ?? "-") / @(t.FechaHoraFinReal?.ToString("HH:mm") ?? "-")
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-1">
+                                @switch (t.EstadoCodigo)
+                                {
+                                    case "PEN":
+                                        <button class="btn btn-primary btn-sm" @onclick='() => PedirCambio(t, "ENA")'>Iniciar atención</button>
+                                        @if (DateTime.Now >= t.FechaHora)
+                                        {
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick='() => PedirCambio(t, "AUS")'>Ausente</button>
+                                        }
+                                        <button class="btn btn-outline-danger btn-sm" @onclick='() => PedirCambio(t, "CAN")'>Cancelar</button>
+                                        <a class="btn btn-outline-primary btn-sm" href="turnos/reprogramar/@t.Id">Reprogramar</a>
+                                        @if (!t.Confirmado)
+                                        {
+                                            <button class="btn btn-outline-success btn-sm" @onclick="() => Confirmar(t)">Confirmar</button>
+                                        }
+                                        break;
+                                    case "ENA":
+                                        <button class="btn btn-success btn-sm" @onclick='() => PedirCambio(t, "ATE")'>Terminar</button>
+                                        <button class="btn btn-outline-danger btn-sm" @onclick='() => PedirCambio(t, "CAN")'>Cancelar</button>
+                                        @if (DateTime.Now >= t.FechaHora)
+                                        {
+                                            <button class="btn btn-outline-secondary btn-sm" @onclick='() => PedirCambio(t, "AUS")'>Ausente</button>
+                                        }
+                                        break;
+                                    default:
+                                        <button class="btn btn-outline-warning btn-sm" @onclick='() => PedirCambio(t, "PEN")'>Volver a pendiente</button>
+                                        break;
+                                }
+                                <button class="btn btn-outline-dark btn-sm" @onclick="() => VerHistorial(t)">Historial</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted">@turnos.Count turno(s).</p>
+}
+
+@* ---------- Cartel para cambiar el estado ---------- *@
+<Confirmacion @ref="cartelEstado" Titulo="@tituloCambio" textOk="Aceptar" textCancelar="Volver"
+              onConfirm="CambiarEstado" onCancel="() => cartelEstado!.Ocultar()">
+    @if (turnoCambio != null)
+    {
+        <p>
+            <strong>@turnoCambio.Cliente</strong> - @turnoCambio.FechaHora.ToString("dd/MM HH:mm") con @turnoCambio.Barbero (@turnoCambio.Servicio).
+        </p>
+        <label class="form-label">Motivo @(MotivoObligatorio ? "(obligatorio)" : "(opcional)")</label>
+        <textarea class="form-control" rows="2" maxlength="300" @bind="motivo" @bind:event="oninput"></textarea>
+        <p class="text-danger mt-2 mb-0">@mensajeCartel</p>
+    }
+</Confirmacion>
+
+@* ---------- Cartel del historial ---------- *@
+<Confirmacion @ref="cartelHistorial" Titulo="Historial del turno" verOk="false" textCancelar="Cerrar" Grande="true"
+              onCancel="() => cartelHistorial!.Ocultar()">
+    <HistorialTurno Turno="turnoHistorial" OnCambio="HistorialCambio" />
+</Confirmacion>
+
+@code {
+    // Dia que viene en la direccion: /agenda?fecha=2026-10-12 (desde Nuevo turno o Reprogramar).
+    [SupplyParameterFromQuery(Name = "fecha")] public string? FechaQuery { get; set; }
+
+    // Datos de la pantalla
+    List<TurnoListadoDTO>? turnos;
+    List<TurnoListadoDTO>? aConfirmar;
+    List<BarberoDTO> barberos = new();
+    List<EstadoTurnoDTO> estados = new();
+
+    // Filtros (abre en HOY, todos los barberos, todos los estados)
+    private DateOnly fecha = DateOnly.FromDateTime(DateTime.Today);
+    private int barberoId = 0;      // 0 = todos
+    private string estado = "";     // "" = todos
+
+    private string mensaje = "";
+    private string mensajeOk = "";
+    private DateTime ultimaActualizacion = DateTime.Now;
+
+    // Cambio de estado en curso
+    private Confirmacion? cartelEstado;
+    private TurnoListadoDTO? turnoCambio;
+    private string codigoCambio = "";
+    private string motivo = "";
+    private string tituloCambio = "";
+    private string mensajeCartel = "";
+
+    // Historial
+    private Confirmacion? cartelHistorial;
+    private TurnoListadoDTO? turnoHistorial;
+
+    // Actualizacion automatica cada 1 minuto
+    private PeriodicTimer? timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (DateOnly.TryParse(FechaQuery, out var f))
+            fecha = f;
+
+        await LeerCombos();
+        await Actualizar();
+        _ = ActualizarCadaMinuto();
+    }
+
+    // Carga las listas de los filtros (barberos y estados).
+    private async Task LeerCombos()
+    {
+        var respB = await http.GetAsync<List<BarberoDTO>>("api/barbero");
+        if (!respB.Error && respB.Respuesta != null)
+            barberos = respB.Respuesta.OrderBy(b => b.Nombre).ToList();
+
+        var respE = await http.GetAsync<List<EstadoTurnoDTO>>("api/estadoturno");
+        if (!respE.Error && respE.Respuesta != null)
+            estados = respE.Respuesta;
+    }
+
+    // Boton "Actualizar" y timer: recarga el aviso y los turnos del dia.
+    private async Task Actualizar()
+    {
+        await LeerAConfirmar();
+        await LeerTurnos();
+        ultimaActualizacion = DateTime.Now;
+    }
+
+    private async Task LeerAConfirmar()
+    {
+        var resp = await http.GetAsync<List<TurnoListadoDTO>>("api/turno/aconfirmar");
+        if (!resp.Error)
+            aConfirmar = resp.Respuesta ?? new();
+    }
+
+    private async Task LeerTurnos()
+    {
+        var url = $"api/turno/listaturnos?fecha={fecha:yyyy-MM-dd}";
+        if (barberoId > 0) url += $"&barberoId={barberoId}";
+        if (!string.IsNullOrEmpty(estado)) url += $"&estado={estado}";
+
+        var resp = await http.GetAsync<List<TurnoListadoDTO>>(url);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los turnos.";
+        }
+        else
+        {
+            mensaje = "";
+            turnos = resp.Respuesta ?? new();
+        }
+    }
+
+    private async Task CambiarDia(int dias)
+    {
+        fecha = fecha.AddDays(dias);
+        mensajeOk = "";
+        await LeerTurnos();
+    }
+
+    private async Task IrAHoy()
+    {
+        fecha = DateOnly.FromDateTime(DateTime.Today);
+        mensajeOk = "";
+        await LeerTurnos();
+    }
+
+    // ---------------- Paso 8: acciones ----------------
+
+    private async Task Confirmar(TurnoListadoDTO t)
+    {
+        mensaje = "";
+        var resp = await http.PutAsync<object, bool>($"api/turno/{t.Id}/confirmar", new { });
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo confirmar el turno.";
+            return;
+        }
+        mensajeOk = $"Turno de {t.Cliente} de las {t.FechaHora:HH:mm} confirmado.";
+        await Actualizar();
+    }
+
+    // Desde En atencion, Cancelar y Ausente exigen motivo (regla del servidor).
+    private bool MotivoObligatorio =>
+        turnoCambio?.EstadoCodigo == "ENA" && (codigoCambio == "CAN" || codigoCambio == "AUS");
+
+    private void PedirCambio(TurnoListadoDTO t, string codigo)
+    {
+        turnoCambio = t;
+        codigoCambio = codigo;
+        motivo = "";
+        mensajeCartel = "";
+        tituloCambio = codigo switch
+        {
+            "ENA" => "Iniciar atención",
+            "ATE" => "Terminar atención",
+            "AUS" => "Marcar ausente",
+            "CAN" => "Cancelar turno",
+            "PEN" => "Volver a pendiente",
+            _ => "Cambiar estado"
+        };
+        cartelEstado?.Ver();
+    }
+
+    private async Task CambiarEstado()
+    {
+        if (turnoCambio == null) return;
+        mensajeCartel = "";
+        if (MotivoObligatorio && string.IsNullOrWhiteSpace(motivo))
+        {
+            mensajeCartel = "Escribí el motivo.";
+            return;
+        }
+
+        var resp = await http.PutAsync<CambioEstadoTurnoDTO, TurnoListadoDTO>(
+            $"api/turno/{turnoCambio.Id}/estado",
+            new CambioEstadoTurnoDTO { Codigo = codigoCambio, Motivo = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim() });
+        if (resp.Error)
+        {
+            mensajeCartel = resp.Mensaje ?? "No se pudo cambiar el estado.";
+            return;
+        }
+
+        cartelEstado?.Ocultar();
+        mensajeOk = $"{tituloCambio}: {turnoCambio.Cliente} ({turnoCambio.FechaHora:HH:mm}).";
+        await Actualizar();
+    }
+
+    private void VerHistorial(TurnoListadoDTO t)
+    {
+        turnoHistorial = t;
+        cartelHistorial?.Ver();
+    }
+
+    // Se corrigio un movimiento del historial: recarga la agenda y los datos del turno abierto.
+    private async Task HistorialCambio()
+    {
+        await Actualizar();
+        if (turnoHistorial != null && turnos != null)
+            turnoHistorial = turnos.FirstOrDefault(x => x.Id == turnoHistorial.Id) ?? turnoHistorial;
+    }
+
+    // ---------------- Timer ----------------
+
+    private async Task ActualizarCadaMinuto()
+    {
+        timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        while (await timer.WaitForNextTickAsync())
+        {
+            await Actualizar();
+            // Si el historial esta abierto, se mantiene el mismo turno con sus datos nuevos.
+            if (turnoHistorial != null && turnos != null)
+                turnoHistorial = turnos.FirstOrDefault(x => x.Id == turnoHistorial.Id) ?? turnoHistorial;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // Al salir de la page se apaga el timer.
+    public void Dispose()
+    {
+        timer?.Dispose();
+    }
+
+    private static string NombreDia(DateOnly f)
+    {
+        string[] dias = { "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado" };
+        return dias[(int)f.DayOfWeek];
+    }
+
+    private static string ColorEstado(string codigo) => codigo switch
+    {
+        "PEN" => "bg-warning text-dark",   // Pendiente
+        "ENA" => "bg-primary",             // En atencion
+        "ATE" => "bg-success",             // Atendido
+        "AUS" => "bg-secondary",           // Ausente
+        "CAN" => "bg-danger",              // Cancelado
+        _ => "bg-light text-dark"
+    };
+}

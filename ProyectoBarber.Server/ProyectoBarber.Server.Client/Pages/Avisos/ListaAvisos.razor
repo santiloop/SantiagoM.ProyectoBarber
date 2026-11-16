@@ -1,0 +1,114 @@
+﻿@page "/avisos"
+@inject IHttpService http
+
+@* ==================================================================
+   Paso 12 - AVISOS (dueno y recepcionista).
+   Lista lo que paso en el sistema:
+     - Portal del cliente: turno nuevo ("Nuevo cliente" si es su primer turno),
+       turno reprogramado y turno cancelado.
+     - Dias no laborables: agregado, cambiado o quitado.
+     - Horario de un barbero: franja agregada, cambiada o quitada.
+   Filtro: ultima semana / ultimo mes / ultimos 2 meses (el maximo; los avisos
+   de mas de 60 dias se borran solos).
+   "Nuevo" = este usuario todavia no lo habia visto (leido por persona).
+   Lo que hizo el propio usuario aparece en la lista pero no suma en la campanita.
+   Al abrir la page se traen los de 2 meses (GET api/aviso?dias=60) y se marcan
+   como leidos (PUT api/aviso/leidos); el filtro se aplica aca, asi los "nuevo"
+   se siguen viendo resaltados mientras se este en la page.
+   ================================================================== *@
+
+<PageTitle>Avisos</PageTitle>
+
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h3 class="mb-0">Avisos</h3>
+    <div class="btn-group">
+        @foreach (var f in filtros)
+        {
+            <button class="btn @(dias == f.Dias ? "btn-primary" : "btn-outline-primary")"
+                    @onclick="() => Filtrar(f.Dias)">@f.Texto</button>
+        }
+    </div>
+</div>
+
+<p class="text-danger">@mensaje</p>
+
+@if (avisos == null)
+{
+    <p>@(string.IsNullOrEmpty(mensaje) ? "Buscando ...." : "")</p>
+}
+else if (avisos.Count == 0)
+{
+    <p class="text-muted">No hay avisos en este período.</p>
+}
+else
+{
+    <ul class="list-group">
+        @foreach (var a in avisos)
+        {
+            <li class="list-group-item @(a.Nuevo ? "list-group-item-warning" : "")">
+                <div class="d-flex justify-content-between flex-wrap gap-2">
+                    <div>
+                        <span class="badge bg-secondary me-1">@TipoTexto(a.Tipo)</span>
+                        @if (a.Nuevo)
+                        {
+                            <span class="badge bg-danger me-1">nuevo</span>
+                        }
+                        <span>@a.Mensaje</span>
+                    </div>
+                    @if (a.FechaReferencia != null)
+                    {
+                        <a class="btn btn-outline-primary btn-sm" href="agenda?fecha=@a.FechaReferencia.Value.ToString("yyyy-MM-dd")">Ver en la agenda</a>
+                    }
+                </div>
+                <div class="small text-muted mt-1">@a.FechaHora.ToString("dd/MM/yyyy HH:mm") - @a.Autor</div>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    private record Filtro(int Dias, string Texto);
+    private readonly List<Filtro> filtros = new()
+    {
+        new(7, "Última semana"),
+        new(30, "Último mes"),
+        new(60, "Últimos 2 meses")
+    };
+
+    private int dias = 7;
+    private List<AvisoDTO>? todos;      // los de 2 meses
+    private List<AvisoDTO>? avisos;     // los del filtro elegido
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await http.GetAsync<List<AvisoDTO>>("api/aviso?dias=60");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los avisos.";
+            return;
+        }
+        todos = resp.Respuesta ?? new();
+        Filtrar(dias);
+
+        // Quedan todos leidos para este usuario: la campanita vuelve a 0.
+        var respL = await http.PutAsync<object, bool>("api/aviso/leidos", new { });
+        if (!respL.Error) sesion.AvisosLeidos();
+    }
+
+    private void Filtrar(int d)
+    {
+        dias = d;
+        if (todos == null) return;
+        var desde = DateTime.Now.AddDays(-d);
+        avisos = todos.Where(a => a.FechaHora >= desde).ToList();
+    }
+
+    private static string TipoTexto(string tipo) => tipo switch
+    {
+        "Turno" => "Turno",
+        "DiaNoLaborable" => "Día no laborable",
+        "HorarioBarbero" => "Horario barbero",
+        _ => tipo
+    };
+}

@@ -1,0 +1,337 @@
+@page "/turnos/nuevo"
+@inject IHttpService http
+
+@* ==================================================================
+   CU02 - Registrar turno (paso 8). Pestaña "Horario cliente" de Horarios y
+   boton "Nuevo turno" de la Agenda (abre con el dia de la agenda: ?fecha=2026-10-12).
+   1. Cliente: se busca por nombre o telefono. Se pueden corregir sus datos
+      (PUT api/cliente/{id}) o darlo de alta ahi mismo (POST api/cliente).
+   2. Servicio, dia y barbero preferido (opcional).
+   3. Selector de horarios libres: hora y barbero (el sugerido viene marcado).
+   4. Observaciones y estado inicial: Pendiente, o En atencion si el cliente
+      ya esta en el local (solo para hoy).
+   POST api/turno crea el turno (siempre Pendiente); si se eligio En atencion,
+   despues se hace PUT api/turno/{id}/estado con ENA (queda en el historial).
+   ================================================================== *@
+
+<PageTitle>Nuevo turno</PageTitle>
+
+@if (EsPagina)
+{
+    <h3>Nuevo turno</h3>
+}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        @* ---------------- 1. Cliente ---------------- *@
+        <h5>1. Cliente</h5>
+        @if (clienteSel == null && !creandoCliente)
+        {
+            <input class="form-control mb-2" placeholder="Buscar por nombre o teléfono..."
+                   @bind="filtro" @bind:event="oninput" />
+            @if (!string.IsNullOrWhiteSpace(filtro))
+            {
+                <div class="list-group mb-2">
+                    @foreach (var c in Coincidencias)
+                    {
+                        <button type="button" class="list-group-item list-group-item-action" @onclick="() => ElegirCliente(c)">
+                            @c.Nombre <span class="text-muted">- @c.Telefono</span>
+                        </button>
+                    }
+                    @if (Coincidencias.Count == 0)
+                    {
+                        <div class="list-group-item text-muted">Ningún cliente coincide.</div>
+                    }
+                </div>
+            }
+            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="EmpezarClienteNuevo">+ Cliente nuevo</button>
+        }
+        else if (creandoCliente || editandoCliente)
+        {
+            <div class="card card-body mb-2">
+                <strong>@(creandoCliente ? "Cliente nuevo" : "Corregir datos del cliente")</strong>
+                <label class="form-label mt-2">Nombre</label>
+                <input class="form-control" maxlength="200" @bind="clienteForm.Nombre" />
+                <label class="form-label mt-2">Teléfono</label>
+                <input class="form-control" maxlength="20" @bind="clienteForm.Telefono" />
+                <div class="mt-3">
+                    <button type="button" class="btn btn-primary btn-sm" @onclick="GrabarCliente">Grabar cliente</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="CancelarCliente">Cancelar</button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="card card-body mb-2">
+                <div><strong>@clienteSel!.Nombre</strong></div>
+                <div class="text-muted">Tel.: @clienteSel.Telefono</div>
+                <div class="mt-2">
+                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="EmpezarEditarCliente">Corregir datos</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CambiarCliente">Cambiar cliente</button>
+                </div>
+            </div>
+        }
+
+        @* ---------------- 2. Servicio, dia y barbero ---------------- *@
+        <h5 class="mt-4">2. Servicio y día</h5>
+        <label class="form-label">Servicio</label>
+        <select class="form-select mb-2" @bind="servicioId" @bind:after="LimpiarHorario">
+            <option value="0">-- Elegí el servicio --</option>
+            @foreach (var s in servicios)
+            {
+                <option value="@s.Id">@s.Nombre (@s.Duracion min - $ @s.Precio.ToString("N0"))</option>
+            }
+        </select>
+
+        <label class="form-label">Día</label>
+        <input type="date" class="form-control mb-2" @bind="fecha" @bind:after="LimpiarHorario" />
+
+        <label class="form-label">Barbero preferido (opcional)</label>
+        <select class="form-select mb-2" @bind="barberoPreferidoId" @bind:after="LimpiarHorario">
+            <option value="0">Cualquiera (el sistema sugiere)</option>
+            @foreach (var b in barberos)
+            {
+                <option value="@b.Id">@b.Nombre</option>
+            }
+        </select>
+    </div>
+
+    <div class="col-lg-7">
+        @* ---------------- 3. Horario ---------------- *@
+        <h5>3. Horario</h5>
+        <SelectorHorario @ref="selector" Fecha="fecha" ServicioId="servicioId" BarberoId="barberoPreferidoId"
+                         OnElegir="h => elegido = h" />
+
+        @* ---------------- 4. Confirmar ---------------- *@
+        @if (elegido != null)
+        {
+            <h5 class="mt-3">4. Confirmar</h5>
+            <div class="card card-body">
+                <div>
+                    <strong>@NombreDia(fecha) @fecha.ToString("dd/MM/yyyy")</strong>,
+                    de @elegido.Hora.ToString("HH:mm") a @elegido.HoraFinEstimada.ToString("HH:mm"),
+                    con <strong>@elegido.BarberoNombre</strong>
+                    @if (elegido.EsSugerido) { <span class="badge bg-info text-dark ms-1">sugerido</span> }
+                </div>
+
+                <label class="form-label mt-3">Observaciones (opcional)</label>
+                <textarea class="form-control" rows="2" maxlength="200" @bind="observaciones"></textarea>
+
+                @if (fecha == DateOnly.FromDateTime(DateTime.Today))
+                {
+                    <label class="form-label mt-3">Estado</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="estadoInicial" id="estPen"
+                               checked="@(estadoInicial == "PEN")" @onchange='() => estadoInicial = "PEN"' />
+                        <label class="form-check-label" for="estPen">Pendiente</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="estadoInicial" id="estEna"
+                               checked="@(estadoInicial == "ENA")" @onchange='() => estadoInicial = "ENA"' />
+                        <label class="form-check-label" for="estEna">En atención (el cliente ya está en el local)</label>
+                    </div>
+                }
+
+                <div class="mt-3">
+                    <button type="button" class="btn btn-primary" disabled="@(clienteSel == null || grabando)" @onclick="DarTurno">Dar turno</button>
+                    @if (clienteSel == null)
+                    {
+                        <span class="text-danger ms-2">Falta elegir el cliente.</span>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(mensajeOk))
+{
+    <div class="alert alert-success mt-3">
+        @mensajeOk
+        <a class="ms-2" href="agenda?fecha=@fechaOk">Ver en la agenda</a>
+    </div>
+}
+<p class="text-danger mt-3">@mensaje</p>
+
+@code {
+    // Cuando se abre desde la Agenda viene el dia: /turnos/nuevo?fecha=2026-10-12
+    [SupplyParameterFromQuery(Name = "fecha")] public string? FechaQuery { get; set; }
+
+    // false cuando se usa como pestaña dentro de Horarios (no muestra el titulo).
+    [Parameter] public bool EsPagina { get; set; } = true;
+
+    private List<ClienteDTO> clientes = new();
+    private List<ServicioDTO> servicios = new();
+    private List<BarberoDTO> barberos = new();
+
+    private string filtro = "";
+    private ClienteDTO? clienteSel;
+    private ClienteDTO clienteForm = new();
+    private bool creandoCliente;
+    private bool editandoCliente;
+
+    private int servicioId;
+    private DateOnly fecha = DateOnly.FromDateTime(DateTime.Today);
+    private int barberoPreferidoId;
+    private HorarioElegido? elegido;
+    private string observaciones = "";
+    private string estadoInicial = "PEN";
+
+    private SelectorHorario? selector;
+    private bool grabando;
+    private string mensaje = "";
+    private string mensajeOk = "";
+    private string fechaOk = "";
+
+    private List<ClienteDTO> Coincidencias =>
+        clientes.Where(c => c.Nombre.Contains(filtro.Trim(), StringComparison.OrdinalIgnoreCase)
+                         || c.Telefono.Contains(filtro.Trim()))
+                .OrderBy(c => c.Nombre)
+                .Take(8)
+                .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (DateOnly.TryParse(FechaQuery, out var f) && f >= DateOnly.FromDateTime(DateTime.Today))
+            fecha = f;
+
+        await LeerClientes();
+
+        var respS = await http.GetAsync<List<ServicioDTO>>("api/servicio");
+        if (!respS.Error && respS.Respuesta != null) servicios = respS.Respuesta.OrderBy(s => s.Nombre).ToList();
+
+        var respB = await http.GetAsync<List<BarberoDTO>>("api/barbero");
+        if (!respB.Error && respB.Respuesta != null) barberos = respB.Respuesta.Where(b => b.Activo).OrderBy(b => b.Nombre).ToList();
+    }
+
+    private async Task LeerClientes()
+    {
+        var resp = await http.GetAsync<List<ClienteDTO>>("api/cliente");
+        if (!resp.Error && resp.Respuesta != null) clientes = resp.Respuesta;
+    }
+
+    // ---------------- Cliente ----------------
+    private void ElegirCliente(ClienteDTO c)
+    {
+        clienteSel = c;
+        filtro = "";
+        mensaje = "";
+        mensajeOk = "";
+    }
+
+    private void CambiarCliente() => clienteSel = null;
+
+    private void EmpezarClienteNuevo()
+    {
+        // Si lo que se busco parece un telefono, se lo pone en el telefono; si no, en el nombre.
+        var texto = filtro.Trim();
+        var esTelefono = texto.Length > 0 && texto.All(ch => char.IsDigit(ch) || ch == ' ' || ch == '-');
+        clienteForm = new ClienteDTO { Nombre = esTelefono ? "" : texto, Telefono = esTelefono ? texto : "" };
+        creandoCliente = true;
+        mensaje = "";
+    }
+
+    private void EmpezarEditarCliente()
+    {
+        clienteForm = new ClienteDTO { Id = clienteSel!.Id, Nombre = clienteSel.Nombre, Telefono = clienteSel.Telefono };
+        editandoCliente = true;
+        mensaje = "";
+    }
+
+    private void CancelarCliente()
+    {
+        creandoCliente = false;
+        editandoCliente = false;
+        mensaje = "";
+    }
+
+    private async Task GrabarCliente()
+    {
+        mensaje = "";
+        if (string.IsNullOrWhiteSpace(clienteForm.Nombre) || string.IsNullOrWhiteSpace(clienteForm.Telefono))
+        {
+            mensaje = "El nombre y el teléfono del cliente son obligatorios.";
+            return;
+        }
+
+        if (creandoCliente)
+        {
+            var resp = await http.PostAsync<ClienteDTO, int>("api/cliente", clienteForm);
+            if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo grabar el cliente."; return; }
+            clienteForm.Id = resp.Respuesta;
+        }
+        else
+        {
+            var resp = await http.PutAsync<ClienteDTO, bool>($"api/cliente/{clienteForm.Id}", clienteForm);
+            if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo grabar el cliente."; return; }
+        }
+
+        await LeerClientes();
+        clienteSel = clientes.FirstOrDefault(c => c.Id == clienteForm.Id) ?? clienteForm;
+        creandoCliente = false;
+        editandoCliente = false;
+        filtro = "";
+    }
+
+    // ---------------- Turno ----------------
+    private void LimpiarHorario()
+    {
+        elegido = null;
+        mensaje = "";
+    }
+
+    private async Task DarTurno()
+    {
+        mensaje = "";
+        mensajeOk = "";
+        if (clienteSel == null || elegido == null || servicioId <= 0) return;
+
+        grabando = true;
+        var turno = new TurnoDTO
+        {
+            ClienteId = clienteSel.Id,
+            BarberoId = elegido.BarberoId,
+            ServicioId = servicioId,
+            FechaHora = fecha.ToDateTime(elegido.Hora),
+            Observaciones = string.IsNullOrWhiteSpace(observaciones) ? null : observaciones.Trim()
+        };
+
+        var resp = await http.PostAsync<TurnoDTO, int>("api/turno", turno);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo dar el turno.";
+            grabando = false;
+            return;
+        }
+
+        var resumen = $"Turno dado: {clienteSel.Nombre}, {NombreDia(fecha)} {fecha:dd/MM} a las {elegido.Hora:HH:mm} con {elegido.BarberoNombre}";
+
+        if (estadoInicial == "ENA" && fecha == DateOnly.FromDateTime(DateTime.Today))
+        {
+            var respE = await http.PutAsync<CambioEstadoTurnoDTO, TurnoListadoDTO>(
+                $"api/turno/{resp.Respuesta}/estado",
+                new CambioEstadoTurnoDTO { Codigo = "ENA", Motivo = "Cliente atendido sin turno previo." });
+            if (respE.Error)
+                mensaje = "El turno se dio, pero no se pudo pasar a En atención: " + respE.Mensaje;
+            else
+                resumen += " (En atención)";
+        }
+
+        mensajeOk = resumen + ".";
+        fechaOk = fecha.ToString("yyyy-MM-dd");
+
+        // Queda listo para el siguiente turno.
+        elegido = null;
+        observaciones = "";
+        estadoInicial = "PEN";
+        clienteSel = null;
+        grabando = false;
+        if (selector != null) await selector.Recargar();
+    }
+
+    private static string NombreDia(DateOnly f)
+    {
+        string[] dias = { "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado" };
+        return dias[(int)f.DayOfWeek];
+    }
+}

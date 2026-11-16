@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\ProyectoBarber.Repositorio\ProyectoBarber.Repositorio.csproj" />
     <ProjectReference Include="..\..\ProyectoBarber.Shared\ProyectoBarber.Shared.csproj" />
     <ProjectReference Include="..\ProyectoBarber.Server.Client\ProyectoBarber.Server.Client.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.11" />
     <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="10.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">

@@ -3,8 +3,16 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
-@using static Microsoft.AspNetCore.Components.Web.RenderMode
 @using Microsoft.AspNetCore.Components.Web.Virtualization
+@using Microsoft.AspNetCore.Components.WebAssembly.Http
 @using Microsoft.JSInterop
 @using ProyectoBarber.Server.Client
 @using ProyectoBarber.Server.Client.Layout
+@* Paso 5 - Para no repetir estos using en cada page *@
+@using ProyectoBarber.Shared.DTO
+@using ProyectoBarber.Servicio.ServicioHTTP
+@* Paso 7 - Componentes compartidos (TurnosAfectados) *@
+@using ProyectoBarber.Server.Client.Pages.Shared
+@* Paso 10 - Sesion del usuario disponible en todas las pages (sesion.EsDueno, sesion.Nombre...) *@
+@using ProyectoBarber.Server.Client.Auth
+@inject SesionService sesion

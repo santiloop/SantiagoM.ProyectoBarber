@@ -1,0 +1,53 @@
+@* ==================================================================
+   Paso 7 - Componente que muestra el resultado de un cambio de horario
+   o de un dia no laborable (CambioHorarioDTO del servidor):
+   el mensaje y, si hay, los turnos pendientes que quedaron afuera
+   para que la recepcionista los reprograme o cancele (CU15 / CU08).
+   Lo usan Horarios (local y barbero) y Dias no laborables.
+   ================================================================== *@
+
+@if (Resultado != null)
+{
+    @if (Resultado.TurnosAfectados.Count == 0)
+    {
+        <div class="alert alert-success">@Resultado.Mensaje</div>
+    }
+    else
+    {
+        <div class="alert alert-warning">
+            <strong>@Resultado.Mensaje</strong><br />
+            Estos turnos pendientes quedaron fuera del horario. Hay que avisarle al cliente y
+            reprogramarlos o cancelarlos:
+            <table class="table table-sm mb-0 mt-2">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Hora</th>
+                        <th>Cliente</th>
+                        <th>Teléfono</th>
+                        <th>Barbero</th>
+                        <th>Servicio</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in Resultado.TurnosAfectados)
+                    {
+                        <tr>
+                            <td>@t.FechaHora.ToString("dd/MM/yyyy")</td>
+                            <td>@t.FechaHora.ToString("HH:mm")</td>
+                            <td>@t.Cliente</td>
+                            <td>@t.ClienteTelefono</td>
+                            <td>@t.Barbero</td>
+                            <td>@t.Servicio</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    // Respuesta del servidor despues de grabar. Si es null no se muestra nada.
+    [Parameter] public CambioHorarioDTO? Resultado { get; set; }
+}

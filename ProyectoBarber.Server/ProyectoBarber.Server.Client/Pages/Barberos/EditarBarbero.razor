@@ -1,0 +1,99 @@
+﻿@page "/barberos/editar/{Id:int}"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU08 - Gestionar barberos: MODIFICAR (paso 7)
+   Trae el barbero con GET api/barbero/{id} y graba con PUT api/barbero/{id}.
+   Destildar "Activo" es la forma de dar de baja a un barbero.
+   Paso 8: boton Borrar (DELETE api/barbero/{id}) con cartel de confirmacion.
+   ================================================================== *@
+
+<PageTitle>Editar barbero</PageTitle>
+
+<SoloDueno>   @* Paso 10 - solo el dueno *@
+
+<h3>Editar barbero</h3>
+
+@if (barbero == null)
+{
+    <p>@(string.IsNullOrEmpty(mensaje) ? "Buscando ...." : "")</p>
+}
+else
+{
+    <EditForm Model="barbero" OnValidSubmit="Grabar" FormName="EditarBarberoForm">
+        <DataAnnotationsValidator />
+        <div class="mb-3" style="max-width: 400px;">
+            <label class="form-label">DNI:</label>
+            <InputText class="form-control" @bind-Value="barbero.DNI" />
+            <ValidationMessage For="@(() => barbero.DNI)" />
+        </div>
+        <div class="mb-3" style="max-width: 400px;">
+            <label class="form-label">Nombre:</label>
+            <InputText class="form-control" @bind-Value="barbero.Nombre" />
+            <ValidationMessage For="@(() => barbero.Nombre)" />
+        </div>
+        <div class="mb-3" style="max-width: 400px;">
+            <label class="form-label">Teléfono (opcional):</label>
+            <InputText class="form-control" @bind-Value="barbero.Telefono" />
+            <ValidationMessage For="@(() => barbero.Telefono)" />
+        </div>
+        <div class="form-check mb-3">
+            <InputCheckbox class="form-check-input" id="activo" @bind-Value="barbero.Activo" />
+            <label class="form-check-label" for="activo">Activo (si lo destildás, no se le pueden dar turnos nuevos)</label>
+        </div>
+        <button class="btn btn-primary" type="submit">Grabar</button>
+        <button class="btn btn-secondary" type="button" @onclick="Cancelar">Cancelar</button>
+        <button class="btn btn-outline-danger float-end" type="button" @onclick="() => confirmacion!.Ver()">Borrar</button>
+    </EditForm>
+
+    @* Paso 8 - Borrar (dentro de Editar), con el cartel de confirmacion *@
+    <Confirmacion @ref="confirmacion" Titulo="Borrar barbero" textOk="Borrar"
+                  onConfirm="Borrar" onCancel="() => confirmacion!.Ocultar()">
+        ¿Seguro que querés borrar el barbero <strong>@barbero.Nombre</strong>?
+        <div class="text-muted small mt-2">No se puede si tiene turnos registrados. Si ya no trabaja, conviene destildar "Activo".</div>
+    </Confirmacion>
+}
+
+<p class="text-danger mt-3">@mensaje</p>
+</SoloDueno>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private BarberoDTO? barbero;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await http.GetAsync<BarberoDTO>($"api/barbero/{Id}");
+        if (resp.Error)
+            mensaje = resp.Mensaje ?? "No se pudo leer el barbero.";
+        else
+            barbero = resp.Respuesta;
+    }
+
+    private async Task Grabar()
+    {
+        var resp = await http.PutAsync<BarberoDTO, bool>($"api/barbero/{Id}", barbero!);
+        if (!resp.Error)
+            nav.NavigateTo("/barberos");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo grabar.";
+    }
+
+    private Confirmacion? confirmacion;
+
+    // Paso 8 - DELETE api/barbero/{id}. Si el servidor no lo permite, muestra su mensaje.
+    private async Task Borrar()
+    {
+        confirmacion?.Ocultar();
+        var resp = await http.DeleteAsync<bool>($"api/barbero/{Id}");
+        if (!resp.Error)
+            nav.NavigateTo("/barberos");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo borrar.";
+    }
+
+    private void Cancelar() => nav.NavigateTo("/barberos");
+}

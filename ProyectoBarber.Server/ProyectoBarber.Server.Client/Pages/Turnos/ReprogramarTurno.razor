@@ -1,0 +1,176 @@
+@page "/turnos/reprogramar/{Id:int}"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU04 - Reprogramar turno (paso 8). Se abre desde la Agenda (turnos Pendientes).
+   Trae el turno (GET api/turno/{id}) y usa el mismo selector de horarios que el
+   alta; el propio turno no cuenta como ocupado (excluirTurnoId).
+   Graba con PUT api/turno/{id}. El servidor deja la reprogramacion en el
+   historial ("Reprogramado: del ... al ...") y, si cambia la hora, el turno
+   vuelve a quedar sin confirmar.
+   ================================================================== *@
+
+<PageTitle>Reprogramar turno</PageTitle>
+
+<h3>Reprogramar turno</h3>
+
+@if (turno == null)
+{
+    <p>@(string.IsNullOrEmpty(mensaje) ? "Buscando ...." : "")</p>
+}
+else
+{
+    <div class="alert alert-light border">
+        <strong>@cliente?.Nombre</strong> (tel. @cliente?.Telefono) -
+        turno actual: <strong>@NombreDia(DateOnly.FromDateTime(turno.FechaHora)) @turno.FechaHora.ToString("dd/MM/yyyy HH:mm")</strong>
+        con @NombreBarbero(turno.BarberoId), @NombreServicio(turno.ServicioId).
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <label class="form-label">Servicio</label>
+            <select class="form-select mb-2" @bind="servicioId" @bind:after="LimpiarHorario">
+                @foreach (var s in servicios)
+                {
+                    <option value="@s.Id">@s.Nombre (@s.Duracion min - $ @s.Precio.ToString("N0"))</option>
+                }
+            </select>
+
+            <label class="form-label">Nuevo día</label>
+            <input type="date" class="form-control mb-2" @bind="fecha" @bind:after="LimpiarHorario" />
+
+            <label class="form-label">Barbero preferido</label>
+            <select class="form-select mb-2" @bind="barberoPreferidoId" @bind:after="LimpiarHorario">
+                <option value="0">Cualquiera (el sistema sugiere)</option>
+                @foreach (var b in barberos)
+                {
+                    <option value="@b.Id">@b.Nombre</option>
+                }
+            </select>
+
+            <label class="form-label">Observaciones (opcional)</label>
+            <textarea class="form-control" rows="2" maxlength="200" @bind="observaciones"></textarea>
+        </div>
+
+        <div class="col-lg-7">
+            <h5>Nuevo horario</h5>
+            <SelectorHorario Fecha="fecha" ServicioId="servicioId" BarberoId="barberoPreferidoId"
+                             ExcluirTurnoId="Id" OnElegir="h => elegido = h" />
+
+            @if (elegido != null)
+            {
+                <div class="card card-body mt-2">
+                    <div>
+                        Pasa a: <strong>@NombreDia(fecha) @fecha.ToString("dd/MM/yyyy")</strong>,
+                        de @elegido.Hora.ToString("HH:mm") a @elegido.HoraFinEstimada.ToString("HH:mm"),
+                        con <strong>@elegido.BarberoNombre</strong>
+                    </div>
+                    <div class="mt-3">
+                        <button type="button" class="btn btn-primary" disabled="@grabando" @onclick="Grabar">Reprogramar</button>
+                        <button type="button" class="btn btn-secondary" @onclick="Volver">Cancelar</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <button type="button" class="btn btn-secondary mt-2" @onclick="Volver">Volver a la agenda</button>
+            }
+        </div>
+    </div>
+}
+
+<p class="text-danger mt-3">@mensaje</p>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private TurnoDTO? turno;
+    private ClienteDTO? cliente;
+    private List<ServicioDTO> servicios = new();
+    private List<BarberoDTO> barberos = new();
+
+    private int servicioId;
+    private DateOnly fecha;
+    private int barberoPreferidoId;
+    private string observaciones = "";
+    private HorarioElegido? elegido;
+    private bool grabando;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var resp = await http.GetAsync<TurnoDTO>($"api/turno/{Id}");
+        if (resp.Error || resp.Respuesta == null)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo leer el turno.";
+            return;
+        }
+
+        var respS = await http.GetAsync<List<ServicioDTO>>("api/servicio");
+        if (!respS.Error && respS.Respuesta != null) servicios = respS.Respuesta.OrderBy(s => s.Nombre).ToList();
+
+        var respB = await http.GetAsync<List<BarberoDTO>>("api/barbero");
+        if (!respB.Error && respB.Respuesta != null) barberos = respB.Respuesta.OrderBy(b => b.Nombre).ToList();
+
+        var respC = await http.GetAsync<ClienteDTO>($"api/cliente/{resp.Respuesta.ClienteId}");
+        if (!respC.Error) cliente = respC.Respuesta;
+
+        var t = resp.Respuesta;
+        servicioId = t.ServicioId;
+        barberoPreferidoId = t.BarberoId;
+        observaciones = t.Observaciones ?? "";
+        var hoy = DateOnly.FromDateTime(DateTime.Today);
+        var diaTurno = DateOnly.FromDateTime(t.FechaHora);
+        fecha = diaTurno < hoy ? hoy : diaTurno;
+        turno = t;   // al final, para que el selector arranque con todo cargado
+    }
+
+    private void LimpiarHorario()
+    {
+        elegido = null;
+        mensaje = "";
+    }
+
+    private async Task Grabar()
+    {
+        if (turno == null || elegido == null) return;
+        mensaje = "";
+        grabando = true;
+
+        var dto = new TurnoDTO
+        {
+            Id = turno.Id,
+            ClienteId = turno.ClienteId,
+            BarberoId = elegido.BarberoId,
+            ServicioId = servicioId,
+            EstadoTurnoId = turno.EstadoTurnoId,
+            FechaHora = fecha.ToDateTime(elegido.Hora),
+            Observaciones = string.IsNullOrWhiteSpace(observaciones) ? null : observaciones.Trim()
+        };
+
+        var resp = await http.PutAsync<TurnoDTO, bool>($"api/turno/{Id}", dto);
+        grabando = false;
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo reprogramar el turno.";
+            return;
+        }
+        nav.NavigateTo($"agenda?fecha={fecha:yyyy-MM-dd}");
+    }
+
+    private void Volver()
+    {
+        var dia = turno == null ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.FromDateTime(turno.FechaHora);
+        nav.NavigateTo($"agenda?fecha={dia:yyyy-MM-dd}");
+    }
+
+    private string NombreBarbero(int id) => barberos.FirstOrDefault(b => b.Id == id)?.Nombre ?? "";
+    private string NombreServicio(int id) => servicios.FirstOrDefault(s => s.Id == id)?.Nombre ?? "";
+
+    private static string NombreDia(DateOnly f)
+    {
+        string[] dias = { "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado" };
+        return dias[(int)f.DayOfWeek];
+    }
+}

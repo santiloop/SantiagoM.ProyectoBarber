@@ -1,0 +1,78 @@
+@page "/cambiar-contrasena"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   Paso 10 - Cambiar la propia contrasena (PUT api/auth/contrasena).
+   Es obligatorio la primera vez que se entra (o despues de un blanqueo
+   del dueno): hasta cambiarla no se puede usar el resto del sistema.
+   ================================================================== *@
+
+<PageTitle>Cambiar contraseña</PageTitle>
+
+<h3>Cambiar contraseña</h3>
+
+@if (sesion.Datos?.DebeCambiarContrasena == true)
+{
+    <div class="alert alert-warning" style="max-width: 420px;">
+        Antes de seguir tenés que cambiar la contraseña que te dieron.
+    </div>
+}
+
+<EditForm Model="datos" OnValidSubmit="Grabar" FormName="CambiarContrasenaForm">
+    <DataAnnotationsValidator />
+    <div class="mb-3" style="max-width: 420px;">
+        <label class="form-label">Contraseña actual</label>
+        <InputText type="password" class="form-control" @bind-Value="datos.Actual" autocomplete="current-password" />
+        <ValidationMessage For="@(() => datos.Actual)" />
+    </div>
+    <div class="mb-3" style="max-width: 420px;">
+        <label class="form-label">Contraseña nueva (mínimo 6 caracteres)</label>
+        <InputText type="password" class="form-control" @bind-Value="datos.Nueva" autocomplete="new-password" />
+        <ValidationMessage For="@(() => datos.Nueva)" />
+    </div>
+    <div class="mb-3" style="max-width: 420px;">
+        <label class="form-label">Repetí la contraseña nueva</label>
+        <InputText type="password" class="form-control" @bind-Value="repetir" autocomplete="new-password" />
+    </div>
+    <button class="btn btn-primary" type="submit">Grabar</button>
+</EditForm>
+
+<p class="text-danger mt-3">@mensaje</p>
+<p class="text-success">@mensajeOk</p>
+
+@code {
+    private CambiarContrasenaDTO datos = new();
+    private string repetir = "";
+    private string mensaje = "";
+    private string mensajeOk = "";
+
+    private async Task Grabar()
+    {
+        mensaje = "";
+        mensajeOk = "";
+        if (datos.Nueva != repetir)
+        {
+            mensaje = "Las dos contraseñas nuevas no coinciden.";
+            return;
+        }
+
+        var resp = await http.PutAsync<CambiarContrasenaDTO, bool>("api/auth/contrasena", datos);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo cambiar la contraseña.";
+            return;
+        }
+
+        var eraObligatorio = sesion.Datos?.DebeCambiarContrasena == true;
+        await sesion.ContrasenaCambiada();
+        if (eraObligatorio)
+            nav.NavigateTo("agenda");
+        else
+        {
+            datos = new();
+            repetir = "";
+            mensajeOk = "Contraseña cambiada.";
+        }
+    }
+}

@@ -1,0 +1,55 @@
+﻿@page "/servicios/crear"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU09 - Gestionar servicios: ALTA (paso 7)
+   Formulario igual que CrearPais de la catedra: EditForm + validaciones del DTO.
+   Llama a POST api/servicio. Si sale bien vuelve al listado.
+   ================================================================== *@
+
+<PageTitle>Nuevo servicio</PageTitle>
+
+<SoloDueno>   @* Paso 10 - solo el dueno *@
+
+<h3>Nuevo servicio</h3>
+
+<EditForm Model="servicio" OnValidSubmit="Grabar" FormName="CrearServicioForm">
+    <DataAnnotationsValidator />
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Nombre:</label>
+        <InputText class="form-control" @bind-Value="servicio.Nombre" />
+        <ValidationMessage For="@(() => servicio.Nombre)" />
+    </div>
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Duración estimada (minutos):</label>
+        <InputNumber class="form-control" @bind-Value="servicio.Duracion" />
+        <ValidationMessage For="@(() => servicio.Duracion)" />
+    </div>
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Precio ($):</label>
+        <InputNumber class="form-control" @bind-Value="servicio.Precio" />
+        <ValidationMessage For="@(() => servicio.Precio)" />
+    </div>
+    <button class="btn btn-primary" type="submit">Grabar</button>
+    <button class="btn btn-secondary" type="button" @onclick="Cancelar">Cancelar</button>
+</EditForm>
+
+<p class="text-danger mt-3">@mensaje</p>
+</SoloDueno>
+
+@code {
+    private ServicioDTO servicio = new ServicioDTO();
+    private string mensaje = "";
+
+    private async Task Grabar()
+    {
+        var resp = await http.PostAsync<ServicioDTO, int>("api/servicio", servicio);
+        if (!resp.Error)
+            nav.NavigateTo("/servicios");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo grabar.";
+    }
+
+    private void Cancelar() => nav.NavigateTo("/servicios");
+}

@@ -1,0 +1,246 @@
+﻿@inject IHttpService http
+
+@* ==================================================================
+   Paso 8 - SELECTOR DE HORARIOS LIBRES (CU02 Registrar turno, CU04 Reprogramar).
+   Muestra las horas en que el local atiende ese dia (10 hs, 11 hs...) con
+   cuantos lugares libres tiene cada una. Al abrir una hora aparecen los
+   horarios de 5 en 5 minutos marcados libre / ocupado. Al elegir uno libre
+   se muestran los barberos libres con el SUGERIDO ya marcado (el que tiene
+   menos turnos ese dia); la recepcionista puede elegir otro.
+   Usa GET api/turno/disponibles (los libres) y GET api/horariolocal (las horas del local).
+   Parametros:
+     Fecha, ServicioId, BarberoId (0 = cualquiera), ExcluirTurnoId (al reprogramar)
+     OnElegir: devuelve el HorarioElegido (hora + barbero).
+     Publico (paso 11): usa los endpoints publicos api/portal/... (portal del cliente, sin login).
+   ================================================================== *@
+
+@if (ServicioId <= 0)
+{
+    <p class="text-muted">Elegí un servicio para ver los horarios libres.</p>
+}
+else if (cargando)
+{
+    <p>Buscando horarios ....</p>
+}
+else if (!string.IsNullOrEmpty(aviso))
+{
+    <div class="alert alert-light border">@aviso</div>
+}
+else
+{
+    <div class="list-group mb-2">
+        @foreach (var grupo in horas)
+        {
+            var libres = grupo.Value.Count(s => s.Libre != null);
+            var abierta = horaAbierta == grupo.Key;
+            <button type="button"
+                    class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(abierta ? "active" : "")"
+                    @onclick="() => horaAbierta = abierta ? null : (int?)grupo.Key">
+                <span><strong>@grupo.Key.ToString("00") hs</strong></span>
+                @if (libres > 0)
+                {
+                    <span class="badge bg-success">@libres libre(s)</span>
+                }
+                else
+                {
+                    <span class="badge bg-secondary">completo</span>
+                }
+            </button>
+
+            @if (abierta)
+            {
+                <div class="list-group-item">
+                    <div class="d-flex flex-wrap gap-2">
+                        @foreach (var slot in grupo.Value)
+                        {
+                            if (slot.Libre != null)
+                            {
+                                var esElegido = elegido != null && elegido.Hora == slot.Hora;
+                                <button type="button" class="btn btn-sm @(esElegido ? "btn-success" : "btn-outline-success")"
+                                        @onclick="() => ElegirHora(slot.Libre)">
+                                    @slot.Hora.ToString("HH:mm") libre
+                                </button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-light text-muted" disabled>
+                                    @slot.Hora.ToString("HH:mm") ocupado
+                                </button>
+                            }
+                        }
+                    </div>
+
+                    @* Barberos libres en la hora elegida *@
+                    @if (elegido != null && elegido.Hora.Hour == grupo.Key && libreElegido != null)
+                    {
+                        <div class="mt-3">
+                            <strong>Barbero (@elegido.Hora.ToString("HH:mm") a @elegido.HoraFinEstimada.ToString("HH:mm")):</strong>
+                            @foreach (var b in libreElegido.Barberos)
+                            {
+                                var id = $"barb-{b.Id}";
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="barberoElegido" id="@id"
+                                           checked="@(elegido.BarberoId == b.Id)"
+                                           @onchange="() => ElegirBarbero(b)" />
+                                    <label class="form-check-label" for="@id">
+                                        @b.Nombre
+                                        @if (b.Id == libreElegido.BarberoSugeridoId)
+                                        {
+                                            <span class="badge bg-info text-dark ms-1">sugerido</span>
+                                        }
+                                    </label>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        }
+    </div>
+}
+
+<p class="text-danger">@mensaje</p>
+
+@code {
+    [Parameter] public DateOnly Fecha { get; set; }
+    [Parameter] public int ServicioId { get; set; }
+    [Parameter] public int BarberoId { get; set; }          // 0 = cualquiera
+    [Parameter] public int ExcluirTurnoId { get; set; }     // al reprogramar
+    [Parameter] public EventCallback<HorarioElegido?> OnElegir { get; set; }
+    [Parameter] public bool Publico { get; set; }          // paso 11 - portal del cliente
+
+    private string Api => Publico ? "api/portal" : "api";
+    private string ApiDisponibles => Publico ? "api/portal" : "api/turno";
+
+    private record Slot(TimeOnly Hora, HorarioDisponibleDTO? Libre);
+
+    private SortedDictionary<int, List<Slot>> horas = new();
+    private int? horaAbierta;
+    private HorarioElegido? elegido;
+    private HorarioDisponibleDTO? libreElegido;
+    private bool cargando;
+    private string aviso = "";
+    private string mensaje = "";
+
+    // Datos que no cambian mientras la pantalla esta abierta.
+    private List<HorarioLocalDTO>? horarioLocal;
+    private List<DiaNoLaborableDTO>? diasNoLaborables;
+
+    // Para recargar solo cuando cambia algo de lo que se busca.
+    private string ultimaBusqueda = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var busqueda = $"{Fecha:yyyy-MM-dd}|{ServicioId}|{BarberoId}|{ExcluirTurnoId}";
+        if (busqueda == ultimaBusqueda) return;
+        ultimaBusqueda = busqueda;
+        await Cargar();
+    }
+
+    // Lo puede llamar la page despues de dar un turno, para refrescar los libres.
+    public async Task Recargar()
+    {
+        await Cargar();
+        StateHasChanged();
+    }
+
+    private async Task Cargar()
+    {
+        elegido = null;
+        libreElegido = null;
+        horaAbierta = null;
+        horas = new();
+        aviso = "";
+        mensaje = "";
+        if (ServicioId <= 0) return;
+
+        cargando = true;
+
+        if (horarioLocal == null)
+        {
+            var respL = await http.GetAsync<List<HorarioLocalDTO>>($"{Api}/horariolocal");
+            horarioLocal = respL.Error ? new() : respL.Respuesta ?? new();
+        }
+        if (diasNoLaborables == null)
+        {
+            var respD = await http.GetAsync<List<DiaNoLaborableDTO>>($"{Api}/dianolaborable");
+            diasNoLaborables = respD.Error ? new() : respD.Respuesta ?? new();
+        }
+
+        var hoy = DateOnly.FromDateTime(DateTime.Today);
+        var noLaborable = diasNoLaborables.FirstOrDefault(d => d.Fecha == Fecha);
+        var franjas = horarioLocal.Where(f => f.DiaSemana == (int)Fecha.DayOfWeek)
+                                  .OrderBy(f => f.HoraDesde).ToList();
+
+        if (Fecha < hoy)
+            aviso = "Esa fecha ya pasó.";
+        else if (noLaborable != null)
+            aviso = $"El {Fecha:dd/MM/yyyy} es día no laborable: {noLaborable.Motivo}.";
+        else if (franjas.Count == 0)
+            aviso = "El local no atiende ese día.";
+
+        if (aviso != "")
+        {
+            cargando = false;
+            return;
+        }
+
+        var url = $"{ApiDisponibles}/disponibles?fecha={Fecha:yyyy-MM-dd}&servicioId={ServicioId}";
+        if (BarberoId > 0) url += $"&barberoId={BarberoId}";
+        if (ExcluirTurnoId > 0) url += $"&excluirTurnoId={ExcluirTurnoId}";
+
+        var resp = await http.GetAsync<List<HorarioDisponibleDTO>>(url);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los horarios libres.";
+            cargando = false;
+            return;
+        }
+        var libres = (resp.Respuesta ?? new()).ToDictionary(l => l.Hora);
+
+        // Todas las horas del local de ese dia, de 5 en 5 minutos (sin las que ya pasaron).
+        var ahora = TimeOnly.FromDateTime(DateTime.Now);
+        foreach (var f in franjas)
+        {
+            for (var h = f.HoraDesde; h < f.HoraHasta; h = h.AddMinutes(5))
+            {
+                if (Fecha == hoy && h <= ahora) continue;
+                if (!horas.ContainsKey(h.Hour)) horas[h.Hour] = new();
+                horas[h.Hour].Add(new Slot(h, libres.GetValueOrDefault(h)));
+                if (h.AddMinutes(5) < h) break; // por si una franja llega a medianoche
+            }
+        }
+
+        if (horas.Count == 0)
+            aviso = "Ya no quedan horarios para hoy.";
+        else if (libres.Count == 0)
+            aviso = BarberoId > 0
+                ? "Ese barbero no tiene horarios libres ese día para este servicio. Probá con otro barbero u otro día."
+                : "No hay horarios libres ese día para este servicio.";
+
+        cargando = false;
+    }
+
+    private async Task ElegirHora(HorarioDisponibleDTO libre)
+    {
+        libreElegido = libre;
+        elegido = new HorarioElegido
+        {
+            Hora = libre.Hora,
+            HoraFinEstimada = libre.HoraFinEstimada,
+            BarberoId = libre.BarberoSugeridoId,
+            BarberoNombre = libre.BarberoSugeridoNombre,
+            EsSugerido = true
+        };
+        await OnElegir.InvokeAsync(elegido);
+    }
+
+    private async Task ElegirBarbero(BarberoLibreDTO b)
+    {
+        if (elegido == null || libreElegido == null) return;
+        elegido.BarberoId = b.Id;
+        elegido.BarberoNombre = b.Nombre;
+        elegido.EsSugerido = b.Id == libreElegido.BarberoSugeridoId;
+        await OnElegir.InvokeAsync(elegido);
+    }
+}

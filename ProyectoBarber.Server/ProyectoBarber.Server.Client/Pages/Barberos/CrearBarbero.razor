@@ -1,0 +1,60 @@
+﻿@page "/barberos/crear"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU08 - Gestionar barberos: ALTA (paso 7)
+   Llama a POST api/barbero. Sus horarios se cargan despues en la
+   page Horarios (pestaña "Horario barbero").
+   ================================================================== *@
+
+<PageTitle>Nuevo barbero</PageTitle>
+
+<SoloDueno>   @* Paso 10 - solo el dueno *@
+
+<h3>Nuevo barbero</h3>
+
+<EditForm Model="barbero" OnValidSubmit="Grabar" FormName="CrearBarberoForm">
+    <DataAnnotationsValidator />
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">DNI:</label>
+        <InputText class="form-control" @bind-Value="barbero.DNI" />
+        <ValidationMessage For="@(() => barbero.DNI)" />
+    </div>
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Nombre:</label>
+        <InputText class="form-control" @bind-Value="barbero.Nombre" />
+        <ValidationMessage For="@(() => barbero.Nombre)" />
+    </div>
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Teléfono (opcional):</label>
+        <InputText class="form-control" @bind-Value="barbero.Telefono" />
+        <ValidationMessage For="@(() => barbero.Telefono)" />
+    </div>
+    <div class="form-check mb-3">
+        <InputCheckbox class="form-check-input" id="activo" @bind-Value="barbero.Activo" />
+        <label class="form-check-label" for="activo">Activo</label>
+    </div>
+    <button class="btn btn-primary" type="submit">Grabar</button>
+    <button class="btn btn-secondary" type="button" @onclick="Cancelar">Cancelar</button>
+</EditForm>
+
+<p class="text-muted mt-3">Después de grabarlo, cargá sus días y horas en <strong>Horarios → Horario barbero</strong>.</p>
+<p class="text-danger">@mensaje</p>
+</SoloDueno>
+
+@code {
+    private BarberoDTO barbero = new BarberoDTO();
+    private string mensaje = "";
+
+    private async Task Grabar()
+    {
+        var resp = await http.PostAsync<BarberoDTO, int>("api/barbero", barbero);
+        if (!resp.Error)
+            nav.NavigateTo("/barberos");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo grabar.";
+    }
+
+    private void Cancelar() => nav.NavigateTo("/barberos");
+}

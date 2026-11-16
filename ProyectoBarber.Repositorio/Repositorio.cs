@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ProyectoBarber.Repositorio
 {
+    // Implementacion generica del CRUD para cualquier entidad que herede
+    // de EntityBase. Los repositorios especificos heredan de esta clase.
     public class Repositorio<E> : IRepositorio<E> where E : class, IEntityBase
     {
         private readonly AppDbContext context;

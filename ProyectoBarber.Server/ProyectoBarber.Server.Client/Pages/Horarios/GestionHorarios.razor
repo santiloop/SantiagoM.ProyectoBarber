@@ -1,0 +1,43 @@
+@page "/horarios"
+@using ProyectoBarber.Server.Client.Pages.Turnos
+
+@* ==================================================================
+   Paso 7 - Pagina de horarios, dividida en pestañas:
+     - Horario local   -> CU15 Configurar horario del local  (HorarioLocalTab)
+     - Horario barbero -> CU08 Horarios de cada barbero       (HorarioBarberoTab)
+     - Horario cliente -> CU02 Dar turno a un cliente: datos del cliente + horarios
+                          libres (paso 8, NuevoTurno con el SelectorHorario)
+   ================================================================== *@
+
+<PageTitle>Horarios</PageTitle>
+
+<h3>Horarios</h3>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <button class="nav-link @(pestania == "local" ? "active" : "")" @onclick='() => pestania = "local"'>Horario local</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(pestania == "barbero" ? "active" : "")" @onclick='() => pestania = "barbero"'>Horario barbero</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(pestania == "cliente" ? "active" : "")" @onclick='() => pestania = "cliente"'>Horario cliente</button>
+    </li>
+</ul>
+
+@if (pestania == "local")
+{
+    <HorarioLocalTab />
+}
+else if (pestania == "barbero")
+{
+    <HorarioBarberoTab />
+}
+else
+{
+    <NuevoTurno EsPagina="false" />
+}
+
+@code {
+    private string pestania = "local";
+}

@@ -1,0 +1,17 @@
+@* ==================================================================
+   Paso 10 - Muestra el contenido solo si el usuario es Dueno.
+   A la recepcionista le muestra un aviso (el servidor igual rechaza el pedido).
+   Uso: <SoloDueno> ...contenido de la page... </SoloDueno>
+   ================================================================== *@
+@if (sesion.EsDueno)
+{
+    @ChildContent
+}
+else
+{
+    <div class="alert alert-warning mt-3">Esta sección es solo para el dueño.</div>
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

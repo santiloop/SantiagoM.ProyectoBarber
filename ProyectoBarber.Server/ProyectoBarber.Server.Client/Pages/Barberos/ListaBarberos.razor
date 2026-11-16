@@ -1,0 +1,92 @@
+﻿@page "/barberos"
+@inject IHttpService http
+
+@* ==================================================================
+   CU08 - Gestionar barberos: LISTADO (paso 6)
+   Llama a GET api/barbero con el HttpService, igual que ListaPais.
+   Muestra activos e inactivos, con una columna que lo indica.
+   Paso 7: boton Nuevo y Editar en cada fila. Paso 8: Borrar esta dentro de Editar.
+   ================================================================== *@
+
+<PageTitle>Barberos</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">Barberos</h3>
+    @* Paso 10 - solo el dueno da de alta *@
+    @if (sesion.EsDueno)
+    {
+        <a class="btn btn-primary" href="barberos/crear">Nuevo barbero</a>
+    }
+</div>
+
+@if (barberos == null)
+{
+    <p>Buscando ....</p>
+}
+else if (barberos.Count == 0)
+{
+    <p>No hay barberos cargados.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>DNI</th>
+                <th>Nombre</th>
+                <th>Teléfono</th>
+                <th>Activo</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var barbero in barberos)
+            {
+                <tr>
+                    <td>@barbero.DNI</td>
+                    <td>@barbero.Nombre</td>
+                    <td>@barbero.Telefono</td>
+                    <td>
+                        @if (barbero.Activo)
+                        {
+                            <span class="badge bg-success">Sí</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">No</span>
+                        }
+                    </td>
+                    <td>@if (sesion.EsDueno) { <a class="btn btn-outline-primary btn-sm" href="barberos/editar/@barbero.Id">Editar</a> }</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<p>@mensaje</p>
+
+@code {
+    List<BarberoDTO>? barberos;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LeerBarberos();
+    }
+
+    private async Task LeerBarberos()
+    {
+        var resp = await http.GetAsync<List<BarberoDTO>>("api/barbero");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los barberos.";
+        }
+        else
+        {
+            // Primero los activos y despues por nombre.
+            barberos = resp.Respuesta?.OrderByDescending(b => b.Activo)
+                                      .ThenBy(b => b.Nombre)
+                                      .ToList();
+        }
+    }
+}

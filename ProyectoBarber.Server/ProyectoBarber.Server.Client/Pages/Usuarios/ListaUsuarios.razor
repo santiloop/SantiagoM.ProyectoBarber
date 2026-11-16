@@ -1,0 +1,220 @@
+@page "/usuarios"
+@inject IHttpService http
+
+@* ==================================================================
+   CU11 - Gestionar usuarios (paso 10). SOLO el Dueno.
+   GET/POST/PUT api/usuario y PUT api/usuario/{id}/contrasena (blanqueo).
+   - Nuevo usuario: con una contrasena inicial; al entrar la tiene que cambiar.
+   - Editar: nombre, rol y activo (desactivar = dar de baja; no se borra
+     porque sus cambios quedan en el historial de los turnos).
+   - Blanquear contrasena: el dueno le pone una nueva y el usuario la cambia al entrar.
+   El servidor no deja quedarse sin ningun dueno activo.
+   ================================================================== *@
+
+<PageTitle>Usuarios</PageTitle>
+
+<SoloDueno>
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h3 class="mb-0">Usuarios</h3>
+        <button class="btn btn-primary" @onclick="Nuevo">Nuevo usuario</button>
+    </div>
+
+    @* ---------- Formulario (nuevo / editar) ---------- *@
+    @if (form != null)
+    {
+        <div class="card card-body mb-3" style="max-width: 520px;">
+            <h5>@(form.Id == 0 ? "Nuevo usuario" : "Editar usuario")</h5>
+            <EditForm Model="form" OnValidSubmit="Grabar" FormName="UsuarioForm">
+                <DataAnnotationsValidator />
+                <div class="mb-2">
+                    <label class="form-label">Usuario (para entrar, sin espacios)</label>
+                    <InputText class="form-control" @bind-Value="form.NombreUsuario" />
+                    <ValidationMessage For="@(() => form.NombreUsuario)" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Nombre</label>
+                    <InputText class="form-control" @bind-Value="form.Nombre" />
+                    <ValidationMessage For="@(() => form.Nombre)" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label">Rol</label>
+                    <InputSelect class="form-select" @bind-Value="form.Rol">
+                        <option value="@Roles.Recepcionista">Recepcionista</option>
+                        <option value="@Roles.Dueno">Dueño</option>
+                    </InputSelect>
+                </div>
+                @if (form.Id == 0)
+                {
+                    <div class="mb-2">
+                        <label class="form-label">Contraseña inicial (mínimo 6; la cambia al entrar)</label>
+                        <InputText class="form-control" @bind-Value="form.Contrasena" />
+                    </div>
+                }
+                else
+                {
+                    <div class="form-check mb-2">
+                        <InputCheckbox class="form-check-input" id="usrActivo" @bind-Value="form.Activo" />
+                        <label class="form-check-label" for="usrActivo">Activo (si lo destildás, no puede entrar)</label>
+                    </div>
+                }
+                <button class="btn btn-primary" type="submit">Grabar</button>
+                <button class="btn btn-secondary" type="button" @onclick="() => form = null">Cancelar</button>
+            </EditForm>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(mensajeOk))
+    {
+        <div class="alert alert-success py-2">@mensajeOk</div>
+    }
+    <p class="text-danger">@mensaje</p>
+
+    @* ---------- Listado ---------- *@
+    @if (usuarios == null)
+    {
+        <p>Buscando ....</p>
+    }
+    else
+    {
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Usuario</th>
+                    <th>Nombre</th>
+                    <th>Rol</th>
+                    <th>Activo</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var u in usuarios)
+                {
+                    <tr>
+                        <td>@u.NombreUsuario</td>
+                        <td>@u.Nombre</td>
+                        <td>@Roles.Nombre(u.Rol)</td>
+                        <td>
+                            @if (u.Activo)
+                            {
+                                <span class="badge bg-success">Sí</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">No</span>
+                            }
+                        </td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-outline-primary btn-sm" @onclick="() => Editar(u)">Editar</button>
+                            <button class="btn btn-outline-warning btn-sm" @onclick="() => PedirBlanqueo(u)">Blanquear contraseña</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* ---------- Cartel para blanquear la contrasena ---------- *@
+    <Confirmacion @ref="cartelBlanqueo" Titulo="Blanquear contraseña" textOk="Grabar"
+                  onConfirm="Blanquear" onCancel="() => cartelBlanqueo!.Ocultar()">
+        @if (usuarioBlanqueo != null)
+        {
+            <p>Nueva contraseña para <strong>@usuarioBlanqueo.Nombre</strong> (@usuarioBlanqueo.NombreUsuario). La va a tener que cambiar al entrar.</p>
+            <input class="form-control" @bind="nuevaContrasena" @bind:event="oninput" placeholder="Mínimo 6 caracteres" />
+            <p class="text-danger mt-2 mb-0">@mensajeCartel</p>
+        }
+    </Confirmacion>
+</SoloDueno>
+
+@code {
+    private List<UsuarioDTO>? usuarios;
+    private UsuarioDTO? form;
+    private string mensaje = "";
+    private string mensajeOk = "";
+
+    private Confirmacion? cartelBlanqueo;
+    private UsuarioDTO? usuarioBlanqueo;
+    private string nuevaContrasena = "";
+    private string mensajeCartel = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (sesion.EsDueno)
+            await LeerUsuarios();
+    }
+
+    private async Task LeerUsuarios()
+    {
+        var resp = await http.GetAsync<List<UsuarioDTO>>("api/usuario");
+        if (resp.Error)
+            mensaje = resp.Mensaje ?? "No se pudieron leer los usuarios.";
+        else
+            usuarios = resp.Respuesta ?? new();
+    }
+
+    private void Nuevo()
+    {
+        mensaje = "";
+        mensajeOk = "";
+        form = new UsuarioDTO { Rol = Roles.Recepcionista, Activo = true };
+    }
+
+    private void Editar(UsuarioDTO u)
+    {
+        mensaje = "";
+        mensajeOk = "";
+        form = new UsuarioDTO { Id = u.Id, NombreUsuario = u.NombreUsuario, Nombre = u.Nombre, Rol = u.Rol, Activo = u.Activo };
+    }
+
+    private async Task Grabar()
+    {
+        if (form == null) return;
+        mensaje = "";
+        mensajeOk = "";
+
+        if (form.Id == 0)
+        {
+            var resp = await http.PostAsync<UsuarioDTO, int>("api/usuario", form);
+            if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo grabar."; return; }
+            mensajeOk = $"Usuario {form.NombreUsuario} creado. Pasale la contraseña inicial: la va a cambiar al entrar.";
+        }
+        else
+        {
+            var resp = await http.PutAsync<UsuarioDTO, bool>($"api/usuario/{form.Id}", form);
+            if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo grabar."; return; }
+            mensajeOk = $"Usuario {form.NombreUsuario} actualizado.";
+        }
+
+        form = null;
+        await LeerUsuarios();
+    }
+
+    private void PedirBlanqueo(UsuarioDTO u)
+    {
+        usuarioBlanqueo = u;
+        nuevaContrasena = "";
+        mensajeCartel = "";
+        cartelBlanqueo?.Ver();
+    }
+
+    private async Task Blanquear()
+    {
+        if (usuarioBlanqueo == null) return;
+        mensajeCartel = "";
+        if (nuevaContrasena.Length < 6)
+        {
+            mensajeCartel = "La contraseña tiene que tener al menos 6 caracteres.";
+            return;
+        }
+
+        var resp = await http.PutAsync<NuevaContrasenaDTO, bool>(
+            $"api/usuario/{usuarioBlanqueo.Id}/contrasena", new NuevaContrasenaDTO { Nueva = nuevaContrasena });
+        if (resp.Error)
+        {
+            mensajeCartel = resp.Mensaje ?? "No se pudo blanquear la contraseña.";
+            return;
+        }
+
+        cartelBlanqueo?.Ocultar();
+        mensajeOk = $"Contraseña de {usuarioBlanqueo.NombreUsuario} blanqueada. La va a tener que cambiar al entrar.";
+    }
+}

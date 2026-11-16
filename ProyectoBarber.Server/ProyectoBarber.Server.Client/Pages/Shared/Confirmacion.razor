@@ -1,0 +1,70 @@
+@* ==================================================================
+   Paso 8 - Cartel de confirmacion (copiado de la catedra: Pages/Shared/Confirmacion.razor).
+   Unico cambio: el boton de cerrar usa la clase "btn-close" de Bootstrap 5.
+   Uso:
+     <Confirmacion @ref="confirmacion" Titulo="Borrar" onConfirm="Borrar" onCancel="() => confirmacion.Ocultar()">
+         ¿Seguro que querés borrar ...?
+     </Confirmacion>
+     y para mostrarlo: confirmacion.Ver();
+   ================================================================== *@
+
+@if (Mostrar)
+{
+    <div class="modal-backdrop show"></div>
+    <div class="modal fade show" tabindex="-1" role="dialog" style="display: block;">
+        <div class="modal-dialog @(Grande ? "modal-lg" : "")" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@Titulo</h5>
+                    <button @onclick="onCancel" type="button" class="btn-close" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    @ChildContent
+                </div>
+                <div class="modal-footer">
+                    @if (verCancelar)
+                    {
+                        <button @onclick="onCancel" type="button" class="btn btn-secondary">
+                            @textCancelar
+                        </button>
+                    }
+                    @if (verOk)
+                    {
+                        <button @onclick="onConfirm" type="button" class="btn btn-warning">
+                            @textOk
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool Mostrar = false;
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string Titulo { get; set; } = "Confirmar";
+    [Parameter] public string textCancelar { get; set; } = "Cancelar";
+    [Parameter] public string textOk { get; set; } = "Aceptar";
+
+    [Parameter] public EventCallback onCancel { get; set; }
+    [Parameter] public EventCallback onConfirm { get; set; }
+
+    [Parameter] public bool verOk { get; set; } = true;
+    [Parameter] public bool verCancelar { get; set; } = true;
+
+    // Paso 8 - cartel mas ancho (para el historial del turno).
+    [Parameter] public bool Grande { get; set; } = false;
+
+    public void Ver()
+    {
+        Mostrar = true;
+        StateHasChanged();
+    }
+
+    public void Ocultar()
+    {
+        Mostrar = false;
+        StateHasChanged();
+    }
+}

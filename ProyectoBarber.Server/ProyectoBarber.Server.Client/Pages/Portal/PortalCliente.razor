@@ -1,0 +1,346 @@
+@page "/cliente"
+@inject IHttpService http
+
+@* ==================================================================
+   CU12 - PORTAL DEL CLIENTE (paso 11, etapa 2). Pagina publica: no hace
+   falta iniciar sesion. El cliente entra con su telefono (y su nombre la
+   primera vez, asi queda registrado).
+   - Pedir turno: servicio, dia, barbero (opcional) y el selector de horarios
+     libres. Si sigue libre, el turno queda creado al instante (Pendiente).
+     Limite: 2 turnos pedidos por mes.
+   - Mis turnos: reprogramar o cancelar los pendientes, sin aprobacion.
+   Usa los endpoints publicos api/portal/... (PortalController).
+   ================================================================== *@
+
+<PageTitle>Pedí tu turno</PageTitle>
+
+<div style="max-width: 900px;" class="mx-auto mt-3">
+    <h3>Barbería - Pedí tu turno</h3>
+
+    @if (cliente == null)
+    {
+        @* ---------------- Ingreso con el telefono ---------------- *@
+        <div class="card card-body" style="max-width: 420px;">
+            <p class="text-muted mb-2">Ingresá con tu teléfono. Si es la primera vez, escribí también tu nombre.</p>
+            <label class="form-label">Teléfono</label>
+            <input class="form-control mb-2" inputmode="tel" placeholder="Ej.: 1123456789" @bind="telefono" />
+            @if (pedirNombre)
+            {
+                <label class="form-label">Tu nombre</label>
+                <input class="form-control mb-2" maxlength="200" @bind="nombre" />
+            }
+            <button class="btn btn-primary" disabled="@ocupado" @onclick="Ingresar">@(pedirNombre ? "Registrarme" : "Ingresar")</button>
+            <p class="text-danger mt-2 mb-0">@mensaje</p>
+        </div>
+        <p class="mt-3"><a href="login">Soy de la barbería: iniciar sesión</a></p>
+    }
+    else
+    {
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+            <div>Hola <strong>@cliente.Nombre</strong> <span class="text-muted">(@cliente.Telefono)</span></div>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Salir">Salir</button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(mensajeOk))
+        {
+            <div class="alert alert-success">@mensajeOk</div>
+        }
+        <p class="text-danger">@mensaje</p>
+
+        @* ---------------- Pedir turno / reprogramar ---------------- *@
+        <div class="card card-body mb-4">
+            @if (reprogramando != null)
+            {
+                <h5>Reprogramar tu turno del @reprogramando.FechaHora.ToString("dd/MM HH:mm") (@reprogramando.Servicio)</h5>
+            }
+            else
+            {
+                <h5>Pedir turno</h5>
+            }
+
+            <div class="row g-2 mb-2">
+                <div class="col-md-4">
+                    <label class="form-label">Servicio</label>
+                    <select class="form-select" @bind="servicioId" @bind:after="LimpiarHorario" disabled="@(reprogramando != null)">
+                        <option value="0">-- Elegí el servicio --</option>
+                        @foreach (var s in servicios)
+                        {
+                            <option value="@s.Id">@s.Nombre (@s.Duracion min - $ @s.Precio.ToString("N0"))</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Día</label>
+                    <input type="date" class="form-control" @bind="fecha" @bind:after="LimpiarHorario" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Barbero (opcional)</label>
+                    <select class="form-select" @bind="barberoId" @bind:after="LimpiarHorario">
+                        <option value="0">Cualquiera</option>
+                        @foreach (var b in barberos)
+                        {
+                            <option value="@b.Id">@b.Nombre</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <SelectorHorario @ref="selector" Publico="true" Fecha="fecha" ServicioId="servicioId" BarberoId="barberoId"
+                             ExcluirTurnoId="@(reprogramando?.Id ?? 0)" OnElegir="h => elegido = h" />
+
+            @if (elegido != null)
+            {
+                <div class="mt-2">
+                    <strong>@NombreDia(fecha) @fecha.ToString("dd/MM")</strong> a las <strong>@elegido.Hora.ToString("HH:mm")</strong>
+                    con <strong>@elegido.BarberoNombre</strong>
+                </div>
+                @if (reprogramando == null)
+                {
+                    <label class="form-label mt-2">Comentario (opcional)</label>
+                    <input class="form-control" maxlength="200" @bind="observaciones" />
+                }
+                <div class="mt-3">
+                    <button class="btn btn-primary" disabled="@ocupado" @onclick="Confirmar">
+                        @(reprogramando != null ? "Confirmar el cambio" : "Confirmar turno")
+                    </button>
+                    @if (reprogramando != null)
+                    {
+                        <button class="btn btn-secondary ms-1" @onclick="CancelarReprogramacion">No cambiar</button>
+                    }
+                </div>
+            }
+            else if (reprogramando != null)
+            {
+                <div class="mt-2"><button class="btn btn-secondary" @onclick="CancelarReprogramacion">No cambiar</button></div>
+            }
+            <p class="text-muted small mt-3 mb-0">Podés pedir hasta 2 turnos por mes. Reprogramar o cancelar no cuenta.</p>
+        </div>
+
+        @* ---------------- Mis turnos ---------------- *@
+        <h5>Mis próximos turnos</h5>
+        @if (Proximos.Count == 0)
+        {
+            <p class="text-muted">No tenés turnos pendientes.</p>
+        }
+        else
+        {
+            <table class="table table-sm">
+                <tbody>
+                    @foreach (var t in Proximos)
+                    {
+                        <tr>
+                            <td>@NombreDia(DateOnly.FromDateTime(t.FechaHora)) @t.FechaHora.ToString("dd/MM HH:mm")</td>
+                            <td>@t.Servicio con @t.Barbero</td>
+                            <td class="text-nowrap text-end">
+                                <button class="btn btn-outline-primary btn-sm" @onclick="() => EmpezarReprogramar(t)">Reprogramar</button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => PedirCancelar(t)">Cancelar</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        @if (Anteriores.Count > 0)
+        {
+            <h6 class="mt-4 text-muted">Turnos anteriores</h6>
+            <table class="table table-sm text-muted">
+                <tbody>
+                    @foreach (var t in Anteriores.Take(10))
+                    {
+                        <tr>
+                            <td>@t.FechaHora.ToString("dd/MM/yyyy HH:mm")</td>
+                            <td>@t.Servicio con @t.Barbero</td>
+                            <td>@t.Estado</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <Confirmacion @ref="cartelCancelar" Titulo="Cancelar turno" textOk="Sí, cancelar" textCancelar="No"
+                      onConfirm="Cancelar" onCancel="() => cartelCancelar!.Ocultar()">
+            @if (turnoCancelar != null)
+            {
+                <span>¿Seguro que querés cancelar tu turno del <strong>@turnoCancelar.FechaHora.ToString("dd/MM HH:mm")</strong> (@turnoCancelar.Servicio con @turnoCancelar.Barbero)?</span>
+            }
+        </Confirmacion>
+    }
+</div>
+
+@code {
+    private string telefono = "";
+    private string nombre = "";
+    private bool pedirNombre;
+    private PortalClienteDTO? cliente;
+
+    private List<ServicioDTO> servicios = new();
+    private List<BarberoDTO> barberos = new();
+    private List<TurnoListadoDTO> turnos = new();
+
+    private int servicioId;
+    private DateOnly fecha = DateOnly.FromDateTime(DateTime.Today);
+    private int barberoId;
+    private HorarioElegido? elegido;
+    private string observaciones = "";
+    private TurnoListadoDTO? reprogramando;
+    private SelectorHorario? selector;
+
+    private Confirmacion? cartelCancelar;
+    private TurnoListadoDTO? turnoCancelar;
+
+    private bool ocupado;
+    private string mensaje = "";
+    private string mensajeOk = "";
+
+    private List<TurnoListadoDTO> Proximos => turnos
+        .Where(t => t.EstadoCodigo == "PEN" && t.FechaHora > DateTime.Now)
+        .OrderBy(t => t.FechaHora).ToList();
+
+    private List<TurnoListadoDTO> Anteriores => turnos
+        .Where(t => !(t.EstadoCodigo == "PEN" && t.FechaHora > DateTime.Now))
+        .OrderByDescending(t => t.FechaHora).ToList();
+
+    private async Task Ingresar()
+    {
+        mensaje = "";
+        ocupado = true;
+        var resp = await http.PostAsync<PortalIngresoDTO, PortalClienteDTO>("api/portal/ingresar",
+            new PortalIngresoDTO { Telefono = telefono, Nombre = pedirNombre ? nombre : null });
+        ocupado = false;
+
+        if (resp.Error || resp.Respuesta == null)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo ingresar.";
+            // Telefono nuevo: se pide el nombre para registrarlo.
+            if (resp.Response?.StatusCode == System.Net.HttpStatusCode.NotFound) pedirNombre = true;
+            return;
+        }
+
+        cliente = resp.Respuesta;
+        mensajeOk = cliente.EsNuevo ? $"¡Listo {cliente.Nombre}, ya quedaste registrado! Ahora pedí tu turno." : "";
+
+        var respS = await http.GetAsync<List<ServicioDTO>>("api/portal/servicios");
+        if (!respS.Error && respS.Respuesta != null) servicios = respS.Respuesta;
+        var respB = await http.GetAsync<List<BarberoDTO>>("api/portal/barberos");
+        if (!respB.Error && respB.Respuesta != null) barberos = respB.Respuesta;
+        await LeerTurnos();
+    }
+
+    private async Task LeerTurnos()
+    {
+        if (cliente == null) return;
+        var resp = await http.GetAsync<List<TurnoListadoDTO>>($"api/portal/turnos?telefono={Uri.EscapeDataString(cliente.Telefono)}");
+        if (!resp.Error && resp.Respuesta != null) turnos = resp.Respuesta;
+    }
+
+    private void Salir()
+    {
+        cliente = null;
+        telefono = "";
+        nombre = "";
+        pedirNombre = false;
+        turnos = new();
+        reprogramando = null;
+        elegido = null;
+        mensaje = "";
+        mensajeOk = "";
+    }
+
+    private void LimpiarHorario()
+    {
+        elegido = null;
+        mensaje = "";
+    }
+
+    private async Task Confirmar()
+    {
+        if (cliente == null || elegido == null) return;
+        mensaje = "";
+        mensajeOk = "";
+        ocupado = true;
+        var fechaHora = fecha.ToDateTime(elegido.Hora);
+
+        if (reprogramando == null)
+        {
+            var resp = await http.PostAsync<PortalPedirTurnoDTO, int>("api/portal/turno", new PortalPedirTurnoDTO
+            {
+                Telefono = cliente.Telefono,
+                ServicioId = servicioId,
+                BarberoId = elegido.BarberoId,
+                FechaHora = fechaHora,
+                Observaciones = string.IsNullOrWhiteSpace(observaciones) ? null : observaciones.Trim()
+            });
+            ocupado = false;
+            if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo pedir el turno."; await Refrescar(); return; }
+            mensajeOk = $"¡Turno confirmado! {NombreDia(fecha)} {fecha:dd/MM} a las {elegido.Hora:HH:mm} con {elegido.BarberoNombre}.";
+        }
+        else
+        {
+            var resp = await http.PutAsync<PortalReprogramarDTO, bool>($"api/portal/turno/{reprogramando.Id}/reprogramar", new PortalReprogramarDTO
+            {
+                Telefono = cliente.Telefono,
+                BarberoId = elegido.BarberoId,
+                FechaHora = fechaHora
+            });
+            ocupado = false;
+            if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo reprogramar."; await Refrescar(); return; }
+            mensajeOk = $"Turno cambiado al {NombreDia(fecha)} {fecha:dd/MM} a las {elegido.Hora:HH:mm} con {elegido.BarberoNombre}.";
+        }
+
+        reprogramando = null;
+        elegido = null;
+        observaciones = "";
+        await LeerTurnos();
+        await Refrescar();
+    }
+
+    private async Task Refrescar()
+    {
+        if (selector != null) await selector.Recargar();
+    }
+
+    private void EmpezarReprogramar(TurnoListadoDTO t)
+    {
+        mensaje = "";
+        mensajeOk = "";
+        reprogramando = t;
+        servicioId = t.ServicioId;
+        barberoId = t.BarberoId;
+        fecha = DateOnly.FromDateTime(t.FechaHora);
+        elegido = null;
+    }
+
+    private void CancelarReprogramacion()
+    {
+        reprogramando = null;
+        elegido = null;
+    }
+
+    private void PedirCancelar(TurnoListadoDTO t)
+    {
+        turnoCancelar = t;
+        cartelCancelar?.Ver();
+    }
+
+    private async Task Cancelar()
+    {
+        cartelCancelar?.Ocultar();
+        if (cliente == null || turnoCancelar == null) return;
+        mensaje = "";
+        mensajeOk = "";
+        var resp = await http.PutAsync<PortalCancelarDTO, bool>($"api/portal/turno/{turnoCancelar.Id}/cancelar",
+            new PortalCancelarDTO { Telefono = cliente.Telefono });
+        if (resp.Error) { mensaje = resp.Mensaje ?? "No se pudo cancelar."; return; }
+        mensajeOk = $"Cancelaste tu turno del {turnoCancelar.FechaHora:dd/MM HH:mm}.";
+        if (reprogramando?.Id == turnoCancelar.Id) reprogramando = null;
+        await LeerTurnos();
+        await Refrescar();
+    }
+
+    private static string NombreDia(DateOnly f)
+    {
+        string[] dias = { "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado" };
+        return dias[(int)f.DayOfWeek];
+    }
+}

@@ -6,6 +6,8 @@ using ProyectoBarber.BD.Datos.Entity;
 
 namespace ProyectoBarber.Repositorio
 {
+    // Contrato generico: las operaciones comunes a todas las entidades
+    // (listar, buscar por Id, insertar, actualizar, borrar, existe).
     public interface IRepositorio<E> where E : class, IEntityBase
     {
         Task<List<E>> Select();

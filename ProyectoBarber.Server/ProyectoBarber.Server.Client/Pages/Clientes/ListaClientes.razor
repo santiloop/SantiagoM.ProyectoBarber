@@ -1,0 +1,96 @@
+@page "/clientes"
+@inject IHttpService http
+
+@* ==================================================================
+   CU07 - Gestionar clientes: LISTADO (paso 6)
+   Llama a GET api/cliente con el HttpService, igual que ListaPais.
+   Tiene un filtro: a medida que se escribe, muestra solo los clientes
+   cuyo nombre o telefono contienen el texto. El filtro se hace aca en la
+   page (no hace falta un endpoint nuevo en el servidor).
+   Paso 7: boton Nuevo y Editar en cada fila. Paso 8: Borrar esta dentro de Editar.
+   ================================================================== *@
+
+<PageTitle>Clientes</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">Clientes</h3>
+    <a class="btn btn-primary" href="clientes/crear">Nuevo cliente</a>
+</div>
+
+@if (clientes == null)
+{
+    <p>Buscando ....</p>
+}
+else if (clientes.Count == 0)
+{
+    <p>No hay clientes cargados.</p>
+}
+else
+{
+    <div class="mb-3" style="max-width: 400px;">
+        <input class="form-control" placeholder="Buscar por nombre o teléfono..."
+               @bind="filtro" @bind:event="oninput" />
+    </div>
+
+    @if (ClientesFiltrados.Count == 0)
+    {
+        <p>Ningún cliente coincide con "@filtro".</p>
+    }
+    else
+    {
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Teléfono</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var cliente in ClientesFiltrados)
+                {
+                    <tr>
+                        <td>@cliente.Nombre</td>
+                        <td>@cliente.Telefono</td>
+                        <td><a class="btn btn-outline-primary btn-sm" href="clientes/editar/@cliente.Id">Editar</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <p class="text-muted">Mostrando @ClientesFiltrados.Count de @clientes.Count clientes.</p>
+    }
+}
+
+<p>@mensaje</p>
+
+@code {
+    List<ClienteDTO>? clientes;
+    private string filtro = "";
+    private string mensaje = "";
+
+    // Lista que se muestra: todos si el filtro esta vacio, o los que coinciden.
+    private List<ClienteDTO> ClientesFiltrados =>
+        string.IsNullOrWhiteSpace(filtro)
+            ? clientes!
+            : clientes!.Where(c => c.Nombre.Contains(filtro.Trim(), StringComparison.OrdinalIgnoreCase)
+                                || c.Telefono.Contains(filtro.Trim()))
+                       .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LeerClientes();
+    }
+
+    private async Task LeerClientes()
+    {
+        var resp = await http.GetAsync<List<ClienteDTO>>("api/cliente");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los clientes.";
+        }
+        else
+        {
+            clientes = resp.Respuesta?.OrderBy(c => c.Nombre).ToList();
+        }
+    }
+}

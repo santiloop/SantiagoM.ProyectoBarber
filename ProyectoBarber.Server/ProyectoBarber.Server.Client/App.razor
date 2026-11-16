@@ -1,0 +1,8 @@
+﻿@* Paso 5 - Componente raiz del cliente (igual que App.razor de la catedra).
+   Busca la page que corresponde a la URL y la dibuja dentro de MainLayout. *@
+<Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+</Router>

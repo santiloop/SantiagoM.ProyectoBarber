@@ -1,0 +1,66 @@
+﻿@page "/login"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU01 - Iniciar sesion (paso 10).
+   POST api/auth/login. Si sale bien guarda la sesion (token por 12 horas)
+   y va a la Agenda; si el usuario tiene que cambiar la contrasena, el
+   diseno (MainLayout) lo lleva a "Cambiar contraseña".
+   ================================================================== *@
+
+<PageTitle>Iniciar sesión</PageTitle>
+
+<div class="d-flex justify-content-center mt-5">
+    <div class="card shadow-sm" style="width: 100%; max-width: 380px;">
+        <div class="card-body">
+            <h3 class="card-title mb-1">ProyectoBarber</h3>
+            <p class="text-muted">Sistema de turnos - iniciá sesión</p>
+
+            <EditForm Model="login" OnValidSubmit="Entrar" FormName="LoginForm">
+                <DataAnnotationsValidator />
+                <div class="mb-3">
+                    <label class="form-label">Usuario</label>
+                    <InputText class="form-control" @bind-Value="login.NombreUsuario" autocomplete="username" />
+                    <ValidationMessage For="@(() => login.NombreUsuario)" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Contraseña</label>
+                    <InputText type="password" class="form-control" @bind-Value="login.Contrasena" autocomplete="current-password" />
+                    <ValidationMessage For="@(() => login.Contrasena)" />
+                </div>
+                <button class="btn btn-primary w-100" type="submit" disabled="@entrando">
+                    @(entrando ? "Entrando..." : "Entrar")
+                </button>
+            </EditForm>
+
+            <p class="text-danger mt-3 mb-0">@mensaje</p>
+            <hr />
+            @* Paso 11 - Portal del cliente (sin contrasena) *@
+            <a class="btn btn-outline-primary w-100" href="cliente">¿Sos cliente? Pedí tu turno acá</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginDTO login = new();
+    private string mensaje = "";
+    private bool entrando;
+
+    private async Task Entrar()
+    {
+        mensaje = "";
+        entrando = true;
+        var resp = await http.PostAsync<LoginDTO, LoginRespuestaDTO>("api/auth/login", login);
+        entrando = false;
+
+        if (resp.Error || resp.Respuesta == null)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo iniciar sesión.";
+            return;
+        }
+
+        await sesion.Iniciar(resp.Respuesta);
+        nav.NavigateTo(resp.Respuesta.DebeCambiarContrasena ? "cambiar-contrasena" : "agenda");
+    }
+}

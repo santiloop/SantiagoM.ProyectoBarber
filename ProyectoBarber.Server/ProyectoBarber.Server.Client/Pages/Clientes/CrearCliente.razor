@@ -1,0 +1,47 @@
+@page "/clientes/crear"
+@inject IHttpService http
+@inject NavigationManager nav
+
+@* ==================================================================
+   CU07 - Gestionar clientes: ALTA (paso 7)
+   Llama a POST api/cliente. Si el telefono ya existe, el servidor lo rechaza
+   y se muestra su mensaje.
+   ================================================================== *@
+
+<PageTitle>Nuevo cliente</PageTitle>
+
+<h3>Nuevo cliente</h3>
+
+<EditForm Model="cliente" OnValidSubmit="Grabar" FormName="CrearClienteForm">
+    <DataAnnotationsValidator />
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Nombre:</label>
+        <InputText class="form-control" @bind-Value="cliente.Nombre" />
+        <ValidationMessage For="@(() => cliente.Nombre)" />
+    </div>
+    <div class="mb-3" style="max-width: 400px;">
+        <label class="form-label">Teléfono:</label>
+        <InputText class="form-control" @bind-Value="cliente.Telefono" />
+        <ValidationMessage For="@(() => cliente.Telefono)" />
+    </div>
+    <button class="btn btn-primary" type="submit">Grabar</button>
+    <button class="btn btn-secondary" type="button" @onclick="Cancelar">Cancelar</button>
+</EditForm>
+
+<p class="text-danger mt-3">@mensaje</p>
+
+@code {
+    private ClienteDTO cliente = new ClienteDTO();
+    private string mensaje = "";
+
+    private async Task Grabar()
+    {
+        var resp = await http.PostAsync<ClienteDTO, int>("api/cliente", cliente);
+        if (!resp.Error)
+            nav.NavigateTo("/clientes");
+        else
+            mensaje = resp.Mensaje ?? "No se pudo grabar.";
+    }
+
+    private void Cancelar() => nav.NavigateTo("/clientes");
+}

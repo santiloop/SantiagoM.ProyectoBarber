@@ -1,0 +1,77 @@
+﻿@page "/servicios"
+@inject IHttpService http
+
+@* ==================================================================
+   CU09 - Gestionar servicios: LISTADO (primera page, paso 5)
+   Llama a GET api/servicio con el HttpService de la catedra, igual que ListaPais.
+   Paso 7: boton Nuevo y Editar en cada fila. Paso 8: Borrar esta dentro de Editar.
+   ================================================================== *@
+
+<PageTitle>Servicios</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h3 class="mb-0">Servicios</h3>
+    @* Paso 10 - solo el dueno da de alta *@
+    @if (sesion.EsDueno)
+    {
+        <a class="btn btn-primary" href="servicios/crear">Nuevo servicio</a>
+    }
+</div>
+
+@if (servicios == null)
+{
+    <p>Buscando ....</p>
+}
+else if (servicios.Count == 0)
+{
+    <p>No hay servicios cargados.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Servicio</th>
+                <th>Duración estimada</th>
+                <th>Precio</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var servicio in servicios)
+            {
+                <tr>
+                    <td>@servicio.Nombre</td>
+                    <td>@servicio.Duracion min</td>
+                    <td>$ @servicio.Precio.ToString("N0")</td>
+                    <td>@if (sesion.EsDueno) { <a class="btn btn-outline-primary btn-sm" href="servicios/editar/@servicio.Id">Editar</a> }</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<p>@mensaje</p>
+
+@code {
+    List<ServicioDTO>? servicios;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LeerServicios();
+    }
+
+    private async Task LeerServicios()
+    {
+        var resp = await http.GetAsync<List<ServicioDTO>>("api/servicio");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los servicios.";
+        }
+        else
+        {
+            servicios = resp.Respuesta;
+        }
+    }
+}

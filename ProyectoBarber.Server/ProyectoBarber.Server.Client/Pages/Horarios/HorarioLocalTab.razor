@@ -1,0 +1,203 @@
+﻿@inject IHttpService http
+
+@* ==================================================================
+   CU15 - Configurar horario del local (paso 7). Pestaña de la page Horarios.
+   GET api/horariolocal         -> franjas de todos los dias
+   POST api/horariolocal        -> agregar una franja
+   PUT api/horariolocal/{id}    -> modificar una franja. Devuelve CambioHorarioDTO
+                                   con los turnos pendientes que quedaron afuera.
+   El servidor rechaza el cambio si deja a un barbero fuera del horario del local.
+   Paso 8: Quitar una franja (DELETE api/horariolocal/{id}) desde Editar, con cartel de confirmacion.
+   ================================================================== *@
+
+<p class="text-muted">Franjas en las que el local está abierto. Un día puede tener varias franjas (por ejemplo mañana y tarde).</p>
+
+@* Paso 10 - solo el dueno modifica horarios *@
+@if (sesion.EsDueno)
+{
+    @* ---------- Agregar franja ---------- *@
+    <div class="row g-2 align-items-end mb-3">
+        <div class="col-auto">
+            <label class="form-label">Día</label>
+            <select class="form-select" @bind="nuevo.DiaSemana">
+                @foreach (var d in DiasSemana.Lista)
+                {
+                    <option value="@d.Numero">@d.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="col-auto">
+            <label class="form-label">Desde</label>
+            <input type="time" class="form-control" step="300" @bind="nuevo.HoraDesde" />
+        </div>
+        <div class="col-auto">
+            <label class="form-label">Hasta</label>
+            <input type="time" class="form-control" step="300" @bind="nuevo.HoraHasta" />
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" @onclick="Agregar">Agregar franja</button>
+        </div>
+    </div>
+}
+
+<TurnosAfectados Resultado="resultado" />
+<p class="text-danger">@mensaje</p>
+
+@* ---------- Franjas cargadas ---------- *@
+@if (franjas == null)
+{
+    <p>Buscando ....</p>
+}
+else if (franjas.Count == 0)
+{
+    <p>No hay franjas cargadas: el local figura cerrado todos los días.</p>
+}
+else
+{
+    <table class="table table-striped" style="max-width: 700px;">
+        <thead>
+            <tr>
+                <th>Día</th>
+                <th>Desde</th>
+                <th>Hasta</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var f in franjas)
+            {
+                @if (editando != null && editando.Id == f.Id)
+                {
+                    <tr>
+                        <td>
+                            <select class="form-select form-select-sm" @bind="editando.DiaSemana">
+                                @foreach (var d in DiasSemana.Lista)
+                                {
+                                    <option value="@d.Numero">@d.Nombre</option>
+                                }
+                            </select>
+                        </td>
+                        <td><input type="time" class="form-control form-control-sm" step="300" @bind="editando.HoraDesde" /></td>
+                        <td><input type="time" class="form-control form-control-sm" step="300" @bind="editando.HoraHasta" /></td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" @onclick="Guardar">Guardar</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="() => editando = null">Cancelar</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => confirmacion!.Ver()">Quitar</button>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    <tr>
+                        <td>@f.DiaNombre</td>
+                        <td>@f.HoraDesde.ToString("HH:mm")</td>
+                        <td>@f.HoraHasta.ToString("HH:mm")</td>
+                        <td>@if (sesion.EsDueno) { <button class="btn btn-outline-primary btn-sm" @onclick="() => Editar(f)">Editar</button> }</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@* Paso 8 - Cartel para quitar la franja que se esta editando *@
+<Confirmacion @ref="confirmacion" Titulo="Quitar franja" textOk="Quitar"
+              onConfirm="Quitar" onCancel="() => confirmacion!.Ocultar()">
+    @if (editando != null)
+    {
+        <span>¿Seguro que querés quitar la franja de <strong>@NombreDiaEditando</strong> de
+        @editando.HoraDesde.ToString("HH:mm") a @editando.HoraHasta.ToString("HH:mm")?</span>
+    }
+</Confirmacion>
+
+@code {
+    private List<HorarioLocalDTO>? franjas;
+    private HorarioLocalDTO nuevo = new() { DiaSemana = 1, HoraDesde = new TimeOnly(10, 0), HoraHasta = new TimeOnly(13, 0) };
+    private HorarioLocalDTO? editando;     // copia de la franja que se esta editando
+    private CambioHorarioDTO? resultado;   // respuesta del ultimo cambio
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LeerFranjas();
+    }
+
+    private async Task LeerFranjas()
+    {
+        var resp = await http.GetAsync<List<HorarioLocalDTO>>("api/horariolocal");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los horarios.";
+            franjas = new();
+        }
+        else
+        {
+            franjas = (resp.Respuesta ?? new())
+                        .OrderBy(f => DiasSemana.Orden(f.DiaSemana))
+                        .ThenBy(f => f.HoraDesde)
+                        .ToList();
+        }
+    }
+
+    private async Task Agregar()
+    {
+        Limpiar();
+        var resp = await http.PostAsync<HorarioLocalDTO, int>("api/horariolocal", nuevo);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo agregar la franja.";
+            return;
+        }
+        resultado = new CambioHorarioDTO { Id = resp.Respuesta, Mensaje = "Franja agregada." };
+        await LeerFranjas();
+    }
+
+    private void Editar(HorarioLocalDTO f)
+    {
+        Limpiar();
+        editando = new HorarioLocalDTO { Id = f.Id, DiaSemana = f.DiaSemana, HoraDesde = f.HoraDesde, HoraHasta = f.HoraHasta };
+    }
+
+    private async Task Guardar()
+    {
+        Limpiar();
+        var resp = await http.PutAsync<HorarioLocalDTO, CambioHorarioDTO>($"api/horariolocal/{editando!.Id}", editando);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo guardar la franja.";
+            return;
+        }
+        resultado = resp.Respuesta;
+        editando = null;
+        await LeerFranjas();
+    }
+
+    private Confirmacion? confirmacion;
+
+    private string NombreDiaEditando =>
+        DiasSemana.Lista.FirstOrDefault(d => d.Numero == editando?.DiaSemana)?.Nombre ?? "";
+
+    // Paso 8 - DELETE api/horariolocal/{id}. Devuelve CambioHorarioDTO (turnos que quedaron afuera).
+    private async Task Quitar()
+    {
+        confirmacion?.Ocultar();
+        if (editando == null) return;
+        Limpiar();
+        var resp = await http.DeleteAsync<CambioHorarioDTO>($"api/horariolocal/{editando.Id}");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo quitar la franja.";
+            return;
+        }
+        var guardado = resp.Respuesta;
+        editando = null;
+        await LeerFranjas();
+        resultado = guardado;
+    }
+
+    private void Limpiar()
+    {
+        mensaje = "";
+        resultado = null;
+    }
+}

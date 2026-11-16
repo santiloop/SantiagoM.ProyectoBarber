@@ -1,0 +1,194 @@
+﻿@page "/dianolaborables"
+@inject IHttpService http
+
+@* ==================================================================
+   CU16 - Dias no laborables (paso 7).
+   Cualquier dia en que el local no abre: feriado (aunque se decrete a ultimo
+   momento), vacaciones, cierre por algun motivo. Se cargan a mano.
+   GET api/dianolaborable       -> solo los proximos (desde hoy)
+   POST api/dianolaborable      -> agregar. Devuelve CambioHorarioDTO con los
+                                   turnos pendientes de ese dia (quedan afuera).
+   PUT api/dianolaborable/{id}  -> modificar fecha o motivo.
+   Paso 8: Quitar un dia (DELETE api/dianolaborable/{id}) desde Editar, con cartel de confirmacion.
+   ================================================================== *@
+
+<PageTitle>Días no laborables</PageTitle>
+
+<h3>Días no laborables</h3>
+<p class="text-muted">Días en que el local no abre: feriados, vacaciones, cierres por cualquier motivo. Ese día no se pueden dar turnos.</p>
+
+@* ---------- Agregar ---------- *@
+<div class="row g-2 align-items-end mb-3">
+    <div class="col-auto">
+        <label class="form-label">Fecha</label>
+        <input type="date" class="form-control" @bind="nuevo.Fecha" />
+    </div>
+    <div class="col-auto" style="min-width: 300px;">
+        <label class="form-label">Motivo</label>
+        <input class="form-control" maxlength="100" placeholder="Ej.: Feriado decretado, vacaciones..." @bind="nuevo.Motivo" />
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary" @onclick="Agregar">Agregar día</button>
+    </div>
+</div>
+
+<TurnosAfectados Resultado="resultado" />
+<p class="text-danger">@mensaje</p>
+
+@* ---------- Proximos dias no laborables ---------- *@
+@if (dias == null)
+{
+    <p>Buscando ....</p>
+}
+else if (dias.Count == 0)
+{
+    <p>No hay días no laborables cargados de hoy en adelante.</p>
+}
+else
+{
+    <table class="table table-striped" style="max-width: 800px;">
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Motivo</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var d in dias)
+            {
+                @if (editando != null && editando.Id == d.Id)
+                {
+                    <tr>
+                        <td><input type="date" class="form-control form-control-sm" @bind="editando.Fecha" /></td>
+                        <td><input class="form-control form-control-sm" maxlength="100" @bind="editando.Motivo" /></td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" @onclick="Guardar">Guardar</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="() => editando = null">Cancelar</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => confirmacion!.Ver()">Quitar</button>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    <tr>
+                        <td>@NombreDia(d.Fecha) @d.Fecha.ToString("dd/MM/yyyy")</td>
+                        <td>@d.Motivo</td>
+                        <td><button class="btn btn-outline-primary btn-sm" @onclick="() => Editar(d)">Editar</button></td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+}
+
+@* Paso 8 - Cartel para quitar el dia que se esta editando *@
+<Confirmacion @ref="confirmacion" Titulo="Quitar día no laborable" textOk="Quitar"
+              onConfirm="Quitar" onCancel="() => confirmacion!.Ocultar()">
+    @if (editando != null)
+    {
+        <span>¿Seguro que querés quitar el <strong>@editando.Fecha.ToString("dd/MM/yyyy")</strong>? Ese día se vuelven a poder dar turnos.</span>
+    }
+</Confirmacion>
+
+@code {
+    private List<DiaNoLaborableDTO>? dias;
+    private DiaNoLaborableDTO nuevo = new() { Fecha = DateOnly.FromDateTime(DateTime.Today) };
+    private DiaNoLaborableDTO? editando;
+    private CambioHorarioDTO? resultado;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LeerDias();
+    }
+
+    private async Task LeerDias()
+    {
+        var resp = await http.GetAsync<List<DiaNoLaborableDTO>>("api/dianolaborable");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudieron leer los días no laborables.";
+            dias = new();
+        }
+        else
+        {
+            dias = (resp.Respuesta ?? new()).OrderBy(d => d.Fecha).ToList();
+        }
+    }
+
+    private async Task Agregar()
+    {
+        Limpiar();
+        if (string.IsNullOrWhiteSpace(nuevo.Motivo))
+        {
+            mensaje = "El motivo es obligatorio.";
+            return;
+        }
+        var resp = await http.PostAsync<DiaNoLaborableDTO, CambioHorarioDTO>("api/dianolaborable", nuevo);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo agregar el día.";
+            return;
+        }
+        resultado = resp.Respuesta;
+        nuevo = new() { Fecha = DateOnly.FromDateTime(DateTime.Today) };
+        await LeerDias();
+    }
+
+    private void Editar(DiaNoLaborableDTO d)
+    {
+        Limpiar();
+        editando = new DiaNoLaborableDTO { Id = d.Id, Fecha = d.Fecha, Motivo = d.Motivo };
+    }
+
+    private async Task Guardar()
+    {
+        Limpiar();
+        if (string.IsNullOrWhiteSpace(editando!.Motivo))
+        {
+            mensaje = "El motivo es obligatorio.";
+            return;
+        }
+        var resp = await http.PutAsync<DiaNoLaborableDTO, CambioHorarioDTO>($"api/dianolaborable/{editando.Id}", editando);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo guardar el día.";
+            return;
+        }
+        resultado = resp.Respuesta;
+        editando = null;
+        await LeerDias();
+    }
+
+    private Confirmacion? confirmacion;
+
+    // Paso 8 - DELETE api/dianolaborable/{id}
+    private async Task Quitar()
+    {
+        confirmacion?.Ocultar();
+        if (editando == null) return;
+        Limpiar();
+        var resp = await http.DeleteAsync<bool>($"api/dianolaborable/{editando.Id}");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo quitar el día.";
+            return;
+        }
+        editando = null;
+        await LeerDias();
+        resultado = new CambioHorarioDTO { Mensaje = "Día no laborable quitado." };
+    }
+
+    private void Limpiar()
+    {
+        mensaje = "";
+        resultado = null;
+    }
+
+    private static string NombreDia(DateOnly f)
+    {
+        string[] nombres = { "Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado" };
+        return nombres[(int)f.DayOfWeek];
+    }
+}

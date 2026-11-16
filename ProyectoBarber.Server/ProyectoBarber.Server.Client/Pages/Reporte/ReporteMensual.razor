@@ -1,0 +1,314 @@
+﻿@page "/reporte"
+@inject IHttpService http
+@inject IJSRuntime js
+
+@* ==================================================================
+   CU10 - Reporte (paso 9). Actor: Dueno.
+   Se elige el MES y se ven los totales del mes; en la tabla de semanas
+   (lunes a domingo) cada semana tiene "Ver semana" para ver el mismo
+   reporte solo de esa semana.
+   Secciones: resumen, semanas, por barbero, por servicio, clientes que mas
+   faltan y "Ventas y cortes" (cada turno atendido con lo que se cobro).
+   GET api/turno/reporte?desde=...&hasta=...
+   "Descargar PDF" abre la ventana de imprimir del navegador: ahi se elige
+   "Guardar como PDF". Al imprimir se oculta el menu y los botones (app.css).
+   La recaudacion es ESTIMADA: el precio guardado en cada turno atendido.
+   ================================================================== *@
+
+<PageTitle>Reporte</PageTitle>
+
+<SoloDueno>   @* Paso 10 - solo el dueno *@
+
+<div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-3 no-print">
+    <h3 class="mb-0">Reporte</h3>
+    <div class="d-flex flex-wrap align-items-end gap-2">
+        <div>
+            <label class="form-label">Mes</label>
+            <div class="input-group">
+                <button class="btn btn-outline-secondary" title="Mes anterior" @onclick="() => CambiarMes(-1)">◀</button>
+                <input type="month" class="form-control" @bind="mesFecha" @bind:after="ElegirMes" />
+                <button class="btn btn-outline-secondary" title="Mes siguiente" @onclick="() => CambiarMes(1)">▶</button>
+            </div>
+        </div>
+        <button class="btn btn-primary" @onclick="DescargarPdf" disabled="@(reporte == null)">Descargar PDF</button>
+    </div>
+</div>
+
+@* ---------- Titulo (tambien sale en el PDF) ---------- *@
+<h4>
+    @if (semana == null)
+    {
+        <span>Reporte de @NombreMes(mes.Month) @mes.Year</span>
+    }
+    else
+    {
+        <span>Semana del @semana.Desde.ToString("dd/MM") al @semana.Hasta.ToString("dd/MM/yyyy")</span>
+        <button class="btn btn-link btn-sm no-print" @onclick="VolverAlMes">← volver al mes</button>
+    }
+</h4>
+<p class="text-muted small">Recaudación estimada: suma del precio de cada turno atendido (el precio que tenía el servicio cuando se dio el turno).</p>
+
+<p class="text-danger">@mensaje</p>
+
+@if (reporte == null)
+{
+    <p>@(string.IsNullOrEmpty(mensaje) ? "Buscando ...." : "")</p>
+}
+else
+{
+    var r = reporte.Resumen;
+
+    @* ---------- Resumen ---------- *@
+    <div class="row g-2 mb-4">
+        <div class="col-6 col-md-2"><div class="card card-body text-center"><div class="small text-muted">Turnos</div><div class="fs-4">@r.Total</div></div></div>
+        <div class="col-6 col-md-2"><div class="card card-body text-center"><div class="small text-muted">Atendidos</div><div class="fs-4 text-success">@r.Atendidos</div></div></div>
+        <div class="col-6 col-md-2"><div class="card card-body text-center"><div class="small text-muted">Ausentes</div><div class="fs-4">@r.Ausentes</div></div></div>
+        <div class="col-6 col-md-2"><div class="card card-body text-center"><div class="small text-muted">Cancelados</div><div class="fs-4 text-danger">@r.Cancelados</div></div></div>
+        <div class="col-6 col-md-2"><div class="card card-body text-center"><div class="small text-muted">Ausentismo</div><div class="fs-4">@r.PorcentajeAusentismo.ToString("0.#") %</div></div></div>
+        <div class="col-6 col-md-2"><div class="card card-body text-center"><div class="small text-muted">Recaudación</div><div class="fs-4">$ @r.Recaudacion.ToString("N0")</div></div></div>
+    </div>
+    @if (r.Pendientes + r.EnAtencion > 0)
+    {
+        <p class="small text-muted">Además hay @r.Pendientes pendiente(s) y @r.EnAtencion en atención en este período.</p>
+    }
+
+    @* ---------- Semanas (solo en la vista del mes) ---------- *@
+    @if (semana == null)
+    {
+        <h5>Semanas</h5>
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Semana</th>
+                    <th class="text-end">Turnos</th>
+                    <th class="text-end">Atendidos</th>
+                    <th class="text-end">Ausentes</th>
+                    <th class="text-end">Cancelados</th>
+                    <th class="text-end">Ausentismo</th>
+                    <th class="text-end">Recaudación</th>
+                    <th class="no-print"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in reporte.Semanas)
+                {
+                    <tr>
+                        <td>@s.Desde.ToString("dd/MM") al @s.Hasta.ToString("dd/MM")</td>
+                        <td class="text-end">@s.Resumen.Total</td>
+                        <td class="text-end">@s.Resumen.Atendidos</td>
+                        <td class="text-end">@s.Resumen.Ausentes</td>
+                        <td class="text-end">@s.Resumen.Cancelados</td>
+                        <td class="text-end">@s.Resumen.PorcentajeAusentismo.ToString("0.#") %</td>
+                        <td class="text-end">$ @s.Resumen.Recaudacion.ToString("N0")</td>
+                        <td class="no-print"><button class="btn btn-outline-primary btn-sm" @onclick="() => VerSemana(s)">Ver semana</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* ---------- Por barbero ---------- *@
+    <h5 class="mt-4">Por barbero</h5>
+    @if (reporte.Barberos.Count == 0)
+    {
+        <p class="text-muted">Sin turnos en este período.</p>
+    }
+    else
+    {
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Barbero</th>
+                    <th class="text-end">Atendidos</th>
+                    <th class="text-end">Ausentes</th>
+                    <th class="text-end">Cancelados</th>
+                    <th class="text-end">Horas trabajadas</th>
+                    <th class="text-end">Recaudación</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var b in reporte.Barberos)
+                {
+                    <tr>
+                        <td>@b.Barbero</td>
+                        <td class="text-end">@b.Atendidos</td>
+                        <td class="text-end">@b.Ausentes</td>
+                        <td class="text-end">@b.Cancelados</td>
+                        <td class="text-end">@Horas(b.MinutosTrabajados)</td>
+                        <td class="text-end">$ @b.Recaudacion.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* ---------- Por servicio ---------- *@
+    <h5 class="mt-4">Por servicio (atendidos)</h5>
+    @if (reporte.Servicios.Count == 0)
+    {
+        <p class="text-muted">Sin turnos atendidos en este período.</p>
+    }
+    else
+    {
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Servicio</th>
+                    <th class="text-end">Cantidad</th>
+                    <th class="text-end">Recaudación</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in reporte.Servicios)
+                {
+                    <tr>
+                        <td>@s.Servicio</td>
+                        <td class="text-end">@s.Cantidad</td>
+                        <td class="text-end">$ @s.Recaudacion.ToString("N0")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* ---------- Clientes que mas faltan ---------- *@
+    <h5 class="mt-4">Clientes que más faltan</h5>
+    @if (reporte.ClientesQueFaltan.Count == 0)
+    {
+        <p class="text-muted">Nadie faltó en este período.</p>
+    }
+    else
+    {
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Cliente</th>
+                    <th>Teléfono</th>
+                    <th class="text-end">Ausencias</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in reporte.ClientesQueFaltan)
+                {
+                    <tr>
+                        <td>@c.Cliente</td>
+                        <td>@c.Telefono</td>
+                        <td class="text-end">@c.Ausencias</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    @* ---------- Ventas y cortes ---------- *@
+    <h5 class="mt-4">Ventas y cortes</h5>
+    @if (reporte.Ventas.Count == 0)
+    {
+        <p class="text-muted">Sin turnos atendidos en este período.</p>
+    }
+    else
+    {
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Hora</th>
+                    <th>Cliente</th>
+                    <th>Barbero</th>
+                    <th>Servicio</th>
+                    <th>Inicio / fin real</th>
+                    <th class="text-end">Precio</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var v in reporte.Ventas)
+                {
+                    <tr>
+                        <td>@v.FechaHora.ToString("dd/MM/yyyy")</td>
+                        <td>@v.FechaHora.ToString("HH:mm")</td>
+                        <td>@v.Cliente</td>
+                        <td>@v.Barbero</td>
+                        <td>@v.Servicio</td>
+                        <td>@(v.FechaHoraInicioReal?.ToString("HH:mm") ?? "-") / @(v.FechaHoraFinReal?.ToString("HH:mm") ?? "-")</td>
+                        <td class="text-end">$ @v.Precio.ToString("N0")</td>
+                    </tr>
+                }
+                <tr class="fw-bold">
+                    <td colspan="6">Total (@reporte.Ventas.Count corte(s))</td>
+                    <td class="text-end">$ @reporte.Ventas.Sum(v => v.Precio).ToString("N0")</td>
+                </tr>
+            </tbody>
+        </table>
+    }
+}
+</SoloDueno>
+
+@code {
+    private DateOnly mes = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
+    // Blazor enlaza <input type="month"> con un DateTime (se usa solo año y mes).
+    private DateTime mesFecha = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    private ReporteSemanaDTO? semana;     // null = vista del mes
+    private ReporteDTO? reporte;
+    private string mensaje = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LeerReporte();
+    }
+
+    private async Task LeerReporte()
+    {
+        mensaje = "";
+        reporte = null;
+        var desde = semana?.Desde ?? mes;
+        var hasta = semana?.Hasta ?? mes.AddMonths(1).AddDays(-1);
+
+        var resp = await http.GetAsync<ReporteDTO>($"api/turno/reporte?desde={desde:yyyy-MM-dd}&hasta={hasta:yyyy-MM-dd}");
+        if (resp.Error)
+            mensaje = resp.Mensaje ?? "No se pudo armar el reporte.";
+        else
+            reporte = resp.Respuesta;
+    }
+
+    private async Task ElegirMes()
+    {
+        mes = new DateOnly(mesFecha.Year, mesFecha.Month, 1);
+        semana = null;
+        await LeerReporte();
+    }
+
+    private async Task CambiarMes(int meses)
+    {
+        mes = mes.AddMonths(meses);
+        mesFecha = mes.ToDateTime(TimeOnly.MinValue);
+        semana = null;
+        await LeerReporte();
+    }
+
+    private async Task VerSemana(ReporteSemanaDTO s)
+    {
+        semana = s;
+        await LeerReporte();
+    }
+
+    private async Task VolverAlMes()
+    {
+        semana = null;
+        await LeerReporte();
+    }
+
+    // Abre la ventana de imprimir del navegador (ahi se elige "Guardar como PDF").
+    private async Task DescargarPdf()
+    {
+        await js.InvokeVoidAsync("print");
+    }
+
+    private static string Horas(int minutos) => $"{minutos / 60} h {minutos % 60:00} min";
+
+    private static string NombreMes(int m)
+    {
+        string[] meses = { "", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                           "agosto", "septiembre", "octubre", "noviembre", "diciembre" };
+        return meses[m];
+    }
+}

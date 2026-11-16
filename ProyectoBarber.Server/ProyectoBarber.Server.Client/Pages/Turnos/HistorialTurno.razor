@@ -1,0 +1,180 @@
+﻿@inject IHttpService http
+
+@* ==================================================================
+   Paso 8 - HISTORIAL DE UN TURNO (se muestra en un cartel desde la Agenda).
+   Muestra los datos del turno con sus observaciones y cada movimiento
+   (cambios de estado y reprogramaciones) con fecha y motivo.
+   GET api/turno/{id}             -> observaciones
+   GET api/turno/{id}/historial   -> movimientos
+   PUT api/turno/{id}/historial/{historialId} -> corregir un movimiento (opcion B):
+       fecha y motivo en cualquiera; el estado solo en el ultimo (el turno pasa a ese estado).
+   ================================================================== *@
+
+@if (Turno != null)
+{
+    <div class="mb-3">
+        <div><strong>@Turno.Cliente</strong> (tel. @Turno.ClienteTelefono)</div>
+        <div>@Turno.FechaHora.ToString("dd/MM/yyyy HH:mm") a @Turno.FechaHoraFinEstimada.ToString("HH:mm") - @Turno.Servicio con @Turno.Barbero</div>
+        <div>Estado actual: <strong>@Turno.Estado</strong> @(Turno.Confirmado ? " - confirmado por el cliente" : "")</div>
+        <div class="mt-1">
+            <strong>Observaciones:</strong>
+            @(string.IsNullOrWhiteSpace(observaciones) ? "sin observaciones" : observaciones)
+        </div>
+    </div>
+}
+
+@if (movimientos == null)
+{
+    <p>Buscando ....</p>
+}
+else if (movimientos.Count == 0)
+{
+    <p class="text-muted">Este turno todavía no tuvo cambios de estado.</p>
+}
+else
+{
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Fecha</th>
+                <th>Movimiento</th>
+                <th>Motivo</th>
+                <th>Usuario</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var m in movimientos)
+            {
+                @if (editando != null && editandoId == m.Id)
+                {
+                    <tr>
+                        <td><input type="datetime-local" class="form-control form-control-sm" @bind="editando.FechaHora" /></td>
+                        <td>
+                            @m.EstadoAnterior →
+                            @if (m.EsUltimo && !m.EsReprogramacion)
+                            {
+                                <select class="form-select form-select-sm d-inline-block w-auto" @bind="editando.CodigoEstadoNuevo">
+                                    @foreach (var e in estados)
+                                    {
+                                        <option value="@e.Codigo">@e.Nombre</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                <span>@m.EstadoNuevo</span>
+                            }
+                        </td>
+                        <td><input class="form-control form-control-sm" maxlength="300" @bind="editando.Motivo" /></td>
+                        <td>@m.Usuario</td>
+                        <td class="text-nowrap">
+                            <button class="btn btn-primary btn-sm" @onclick="Guardar">Guardar</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="() => editando = null">Cancelar</button>
+                        </td>
+                    </tr>
+                }
+                else
+                {
+                    <tr>
+                        <td class="text-nowrap">@m.FechaHora.ToString("dd/MM/yyyy HH:mm")</td>
+                        <td>
+                            @if (m.EsReprogramacion)
+                            {
+                                <span>Reprogramado</span>
+                            }
+                            else
+                            {
+                                <span>@m.EstadoAnterior → <strong>@m.EstadoNuevo</strong></span>
+                            }
+                        </td>
+                        <td>@m.Motivo</td>
+                        <td>@m.Usuario</td>
+                        <td><button class="btn btn-outline-primary btn-sm" @onclick="() => Editar(m)">Editar</button></td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+    <p class="text-muted small">
+        Podés corregir la fecha y el motivo de cualquier movimiento. El estado solo se puede cambiar en el último, y el turno pasa a ese estado.
+    </p>
+}
+
+<p class="text-danger">@mensaje</p>
+
+@code {
+    [Parameter] public TurnoListadoDTO? Turno { get; set; }
+    // Avisa a la Agenda que el turno cambio (para recargarla).
+    [Parameter] public EventCallback OnCambio { get; set; }
+
+    private List<HistorialEstadoDTO>? movimientos;
+    private List<EstadoTurnoDTO> estados = new();
+    private string? observaciones;
+    private EditarHistorialDTO? editando;
+    private int editandoId;
+    private string mensaje = "";
+    private int turnoCargado;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Turno == null || Turno.Id == turnoCargado) return;
+        turnoCargado = Turno.Id;
+        editando = null;
+        mensaje = "";
+        movimientos = null;
+
+        if (estados.Count == 0)
+        {
+            var respE = await http.GetAsync<List<EstadoTurnoDTO>>("api/estadoturno");
+            if (!respE.Error && respE.Respuesta != null) estados = respE.Respuesta;
+        }
+
+        var respT = await http.GetAsync<TurnoDTO>($"api/turno/{Turno.Id}");
+        observaciones = respT.Error ? null : respT.Respuesta?.Observaciones;
+
+        await LeerMovimientos();
+    }
+
+    private async Task LeerMovimientos()
+    {
+        var resp = await http.GetAsync<List<HistorialEstadoDTO>>($"api/turno/{turnoCargado}/historial");
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo leer el historial.";
+            movimientos = new();
+        }
+        else
+        {
+            movimientos = resp.Respuesta ?? new();
+        }
+    }
+
+    private void Editar(HistorialEstadoDTO m)
+    {
+        mensaje = "";
+        editandoId = m.Id;
+        editando = new EditarHistorialDTO
+        {
+            FechaHora = m.FechaHora,
+            Motivo = m.Motivo,
+            CodigoEstadoNuevo = m.EstadoNuevoCodigo
+        };
+    }
+
+    private async Task Guardar()
+    {
+        if (editando == null) return;
+        mensaje = "";
+        var resp = await http.PutAsync<EditarHistorialDTO, List<HistorialEstadoDTO>>(
+            $"api/turno/{turnoCargado}/historial/{editandoId}", editando);
+        if (resp.Error)
+        {
+            mensaje = resp.Mensaje ?? "No se pudo guardar el cambio.";
+            return;
+        }
+        movimientos = resp.Respuesta ?? new();
+        editando = null;
+        await OnCambio.InvokeAsync();
+    }
+}
